@@ -232,8 +232,13 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> {
+                val before = shift.mode
                 shift.onUp(event.eventTime)
-                if (shift.mode == StickyModifier.Mode.OFF) autoShift = false
+                if (autoShift && before == StickyModifier.Mode.OFF && shift.mode == StickyModifier.Mode.ONESHOT) {
+                    // automatic capital was pending: a Shift tap cancels it instead of adding another
+                    shift.reset()
+                    autoShift = false
+                } else if (shift.mode == StickyModifier.Mode.OFF) autoShift = false
                 updateBarChrome()
                 return true
             }
