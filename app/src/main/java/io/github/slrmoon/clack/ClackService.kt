@@ -174,6 +174,18 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     override fun onEvaluateFullscreenMode(): Boolean = false
 
+    /**
+     * With a hardware keyboard Android normally refuses to show the keyboard window unless the
+     * system option "show on-screen keyboard" is on, so the bar appeared only sometimes.
+     * Our window is just the thin bar: show it whenever a text field asks.
+     */
+    override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean = onEvaluateInputViewShown()
+
+    /** The bar was hidden (e.g. with Back) while the field kept focus: bring it back once the user types. */
+    private fun ensureBarShown() {
+        if (prefs.showBar && !field.raw && !isInputViewShown) runCatching { requestShowSelf(0) }
+    }
+
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         composing.setLength(0)
@@ -238,6 +250,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         if (field.raw) return super.onKeyDown(keyCode, event)
+        if (keyCode != KeyEvent.KEYCODE_BACK && event.repeatCount == 0) ensureBarShown()
         if (symPage > 0 && handleSymPanelKey(ic, keyCode, name, event)) {
             consumedKeys.add(keyCode)
             return true
