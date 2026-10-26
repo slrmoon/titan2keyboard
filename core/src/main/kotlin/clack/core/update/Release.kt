@@ -16,6 +16,22 @@ data class Release(
     companion object {
         private val VERSION = Regex("""(\d+)\.(\d+)\.(\d+)""")
 
+        /**
+         * Parses version.json, published next to the APK by CI:
+         * {"versionName": "0.1.19", "versionCode": 19, "notes": "...", "apk": "https://…/clack.apk", "size": 1234}
+         * Fetched as a plain release download, which is not subject to the GitHub API rate limit.
+         */
+        fun parseVersionFile(json: String): Release? {
+            val root = Json.parse(json) as? Map<*, *> ?: return null
+            return Release(
+                versionName = root["versionName"] as? String ?: return null,
+                versionCode = (root["versionCode"] as? Double)?.toInt() ?: return null,
+                notes = (root["notes"] as? String)?.trim().orEmpty(),
+                apkUrl = root["apk"] as? String ?: return null,
+                apkSize = (root["size"] as? Double)?.toLong() ?: 0L
+            )
+        }
+
         /** Parses GET /repos/{owner}/{repo}/releases/tags/latest. Null if there is no usable APK. */
         fun parse(json: String): Release? {
             val root = Json.parse(json) as? Map<*, *> ?: return null

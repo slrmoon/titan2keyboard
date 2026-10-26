@@ -65,6 +65,22 @@ jobs:
           } > out/notes.md
           cat out/notes.md
 
+      - name: Version file
+        run: |
+          python3 - <<'PY'
+          import json, os
+          run = int(os.environ["GITHUB_RUN_NUMBER"])
+          repo = os.environ["GITHUB_REPOSITORY"]
+          json.dump({
+              "versionName": f"0.1.{run}",
+              "versionCode": run,
+              "notes": open("out/notes.md", encoding="utf-8").read().strip(),
+              "apk": f"https://github.com/{repo}/releases/download/latest/clack.apk",
+              "size": os.path.getsize("out/clack.apk"),
+          }, open("out/version.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+          PY
+          cat out/version.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: clack-apk
@@ -79,4 +95,6 @@ jobs:
           body_path: out/notes.md
           prerelease: false
           make_latest: true
-          files: out/clack.apk
+          files: |
+            out/clack.apk
+            out/version.json

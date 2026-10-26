@@ -25,6 +25,17 @@ class ReleaseTest {
         assertFalse(r.isNewerThan(12))
     }
 
+    @Test fun parsesVersionFile() {
+        val r = Release.parseVersionFile(
+            """{"versionName":"0.1.19","versionCode":19,"notes":"Что нового:\n\nfix","apk":"https://github.com/o/r/releases/download/latest/clack.apk","size":1026642}"""
+        )!!
+        assertEquals("0.1.19", r.versionName)
+        assertEquals(19, r.versionCode)
+        assertEquals(1026642L, r.apkSize)
+        assertTrue(r.notes.endsWith("fix"))
+        assertNull(Release.parseVersionFile("""{"versionName":"0.1.19"}"""))
+    }
+
     @Test fun rejectsReleaseWithoutApk() {
         assertNull(Release.parse("""{"name":"Clack 0.1.3","assets":[]}"""))
         assertNull(Release.parse("""{"name":"no version","assets":[{"name":"a.apk","browser_download_url":"x"}]}"""))

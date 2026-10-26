@@ -35,68 +35,74 @@ class Updater(context: Context) {
     /** Blocking. Returns the latest release, or throws with a message for the user. */
     fun check(): Release {
         sp.edit().putLong(K_LAST_CHECK, System.currentTimeMillis()).apply()
-        val conn = (URL(API_LATEST).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "Clack-keyboard")
-        }
-        try {
-            when (val code = conn.responseCode) {
-                200 -> {}
-                404 -> throw IOException("Релиз не найден. Репозиторий должен быть публичным, и в нём должен быть релиз latest.")
-                403, 429 -> throw IOException("GitHub временно ограничил запросы, попробуйте позже.")
-                else -> throw IOException("GitHub ответил кодом $code.")
+        // version.json is a plain release download: no API rate limit (60 requests/hour per IP,
+        // easily used up on mobile networks where many people share one address).
+        open(VERSION_FILE).use { r ->
+            when (r.code) {
+                200 -> return Release.parseVersionFile(r.text()) ?: throw IOException("Не удалось прочитать version.json.")
+                404 -> {} // older release without version.json: ask the API below
+                else -> throw IOException("GitHub ответил кодом ${r.code}.")
             }
-            val json = conn.inputStream.bufferedReader().use { it.readText() }
-            return Release.parse(json) ?: throw IOException("В релизе нет APK.")
-        } finally {
-            conn.disconnect()
+        }
+        open(API_LATEST, api = true).use { r ->
+            when (r.code) {
+                200 -> return Release.parse(r.text()) ?: throw IOException("В релизе нет APK.")
+                404 -> throw IOException("Релиз не найден. Репозиторий должен быть публичным, и в нём должен быть релиз latest.")
+                403, 429 -> throw IOException("GitHub временно ограничил запросы с вашего IP, попробуйте позже.")
+                else -> throw IOException("GitHub ответил кодом ${r.code}.")
+            }
         }
     }
 
     /** Blocking download into the cache; [progress] gets 0..100. */
     fun download(release: Release, progress: (Int) -> Unit): File {
         val out = File(ctx.cacheDir, "update.apk")
-        var url = URL(release.apkUrl)
-        // GitHub redirects release downloads to its file storage host
-        repeat(5) {
+        open(release.apkUrl).use { r ->
+            if (r.code != 200) throw IOException("Загрузка не удалась (код ${r.code}).")
+            val total = r.conn.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
+            r.conn.inputStream.use { input ->
+                out.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var done = 0L
+                    var last = -1
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                        done += n
+                        if (total > 0) {
+                            val p = (done * 100 / total).toInt()
+                            if (p != last) { last = p; progress(p) }
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private class Response(val conn: HttpURLConnection, val code: Int) : AutoCloseable {
+        fun text(): String = conn.inputStream.bufferedReader().use { it.readText() }
+        override fun close() = conn.disconnect()
+    }
+
+    /** GET following redirects across hosts (release files redirect to GitHub's file storage). */
+    private fun open(start: String, api: Boolean = false): Response {
+        var url = URL(start)
+        repeat(6) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 15_000
                 readTimeout = 30_000
                 setRequestProperty("User-Agent", "Clack-keyboard")
+                if (api) setRequestProperty("Accept", "application/vnd.github+json")
             }
-            when (conn.responseCode) {
-                in 300..399 -> {
-                    url = URL(url, conn.getHeaderField("Location") ?: throw IOException("Пустое перенаправление"))
-                    conn.disconnect()
-                    return@repeat
-                }
-                200 -> {
-                    val total = conn.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
-                    conn.inputStream.use { input ->
-                        out.outputStream().use { output ->
-                            val buf = ByteArray(64 * 1024)
-                            var done = 0L
-                            var last = -1
-                            while (true) {
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                output.write(buf, 0, n)
-                                done += n
-                                if (total > 0) {
-                                    val p = (done * 100 / total).toInt()
-                                    if (p != last) { last = p; progress(p) }
-                                }
-                            }
-                        }
-                    }
-                    conn.disconnect()
-                    return out
-                }
-                else -> { val c = conn.responseCode; conn.disconnect(); throw IOException("Загрузка не удалась (код $c).") }
-            }
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val next = conn.getHeaderField("Location") ?: throw IOException("Пустое перенаправление")
+                conn.disconnect()
+                url = URL(url, next)
+            } else return Response(conn, code)
         }
         throw IOException("Слишком много перенаправлений.")
     }
@@ -129,6 +135,7 @@ class Updater(context: Context) {
     companion object {
         const val REPO = "slrmoon/titan2keyboard"
         private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/tags/latest"
+        private const val VERSION_FILE = "https://github.com/$REPO/releases/download/latest/version.json"
         private const val K_LAST_CHECK = "last_check"
         private const val AUTO_CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
     }
