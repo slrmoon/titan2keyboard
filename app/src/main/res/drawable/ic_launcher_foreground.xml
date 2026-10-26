@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- keyboard body -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M28,38h52a6,6 0,0 1,6 6v22a6,6 0,0 1,-6 6h-52a6,6 0,0 1,-6 -6v-22a6,6 0,0 1,6 -6z"/>
+    <!-- keys -->
+    <path android:fillColor="#2E5BFF"
+        android:pathData="M30,44h7v6h-7z M40,44h7v6h-7z M50,44h7v6h-7z M60,44h7v6h-7z M70,44h7v6h-7z M34,53h7v6h-7z M44,53h7v6h-7z M54,53h7v6h-7z M64,53h7v6h-7z M38,62h32v5h-32z"/>
+</vector>
