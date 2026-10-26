@@ -56,6 +56,15 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk out/clack.apk
           ls -la out
 
+      - name: Release notes
+        run: |
+          {
+            echo "Что нового:"
+            echo
+            git log -1 --format=%B | sed '/^Co-Authored-By:/d; /^Claude-Session:/d'
+          } > out/notes.md
+          cat out/notes.md
+
       - uses: actions/upload-artifact@v4
         with:
           name: clack-apk
@@ -67,7 +76,7 @@ jobs:
         with:
           tag_name: latest
           name: Clack 0.1.${{ github.run_number }}
-          body: Сборка из ${{ github.sha }}. Скачайте APK ниже и установите поверх предыдущей версии.
+          body_path: out/notes.md
           prerelease: false
           make_latest: true
           files: out/clack.apk

@@ -35,6 +35,11 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var store: LayoutStore
     private lateinit var root: LinearLayout
+    private lateinit var updater: Updater
+    private var latest: clack.core.update.Release? = null
+    private var updateStatus: String? = null
+    private var updateBusy = false
+    private var updateButton: Button? = null
     private val dark get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     private val dimColor get() = if (dark) Color.rgb(0x9A, 0x9A, 0xA0) else Color.rgb(0x60, 0x60, 0x66)
 
@@ -43,6 +48,7 @@ class SettingsActivity : Activity() {
         CrashLog.install(this)
         prefs = Prefs(this)
         store = LayoutStore(this)
+        updater = Updater(this)
         Languages.get(this).ensure("ru")
         val scroll = ScrollView(this)
         root = LinearLayout(this).apply {
@@ -57,6 +63,7 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         build()
+        if (!updateBusy && updater.shouldAutoCheck()) checkForUpdate(quiet = true)
     }
 
     private fun build() {
@@ -74,6 +81,21 @@ class SettingsActivity : Activity() {
                 },
                 button("Очистить") { CrashLog.clear(this); build() }
             )
+        }
+
+        // --- updates ---
+        section("Версия ${updater.installedVersionName}")
+        val rel = latest
+        when {
+            rel != null && rel.isNewerThan(updater.installedVersionCode) -> {
+                note("Доступна версия ${rel.versionName}" + if (rel.notes.isNotBlank()) ":\n" + rel.notes.take(600) else "")
+                updateButton = button(if (updateBusy) updateStatus ?: "Загрузка…" else "Обновить до ${rel.versionName}") { if (!updateBusy) startUpdate(rel) }
+                row(updateButton!!)
+            }
+            else -> {
+                updateStatus?.let { note(it) }
+                row(button(if (updateBusy) "Проверяю…" else "Проверить обновления") { if (!updateBusy) checkForUpdate(quiet = false) })
+            }
         }
 
         // --- enable ---
@@ -350,6 +372,49 @@ class SettingsActivity : Activity() {
                         .setMessage("Выучено ${r.words} слов из ${r.messages} $who.")
                         .setPositiveButton("OK", null).show()
                 }.onFailure { toast("Не удалось прочитать файл: ${it.message}") }
+            }
+        }.start()
+    }
+
+    private fun checkForUpdate(quiet: Boolean) {
+        updateBusy = true
+        if (!quiet) build()
+        Thread {
+            val result = runCatching { updater.check() }
+            runOnUiThread {
+                updateBusy = false
+                result.onSuccess { r ->
+                    latest = r
+                    updateStatus = if (r.isNewerThan(updater.installedVersionCode)) null else "Установлена последняя версия."
+                }.onFailure { e ->
+                    if (!quiet) updateStatus = "Не удалось проверить: ${e.message}"
+                }
+                if (!isFinishing) build()
+            }
+        }.start()
+    }
+
+    private fun startUpdate(release: clack.core.update.Release) {
+        if (!updater.canInstall()) {
+            AlertDialog.Builder(this)
+                .setMessage("Разрешите Clack устанавливать обновления: на следующем экране включите «Разрешить установку из этого источника», затем вернитесь и нажмите «Обновить» ещё раз.")
+                .setPositiveButton("Открыть") { _, _ -> startActivity(updater.installPermissionIntent()) }
+                .setNegativeButton("Отмена", null).show()
+            return
+        }
+        updateBusy = true
+        updateStatus = "Загрузка…"
+        build()
+        Thread {
+            val result = runCatching {
+                val apk = updater.download(release) { p -> runOnUiThread { updateStatus = "Загрузка $p%"; updateButton?.text = updateStatus } }
+                updater.install(apk)
+            }
+            runOnUiThread {
+                updateBusy = false
+                updateStatus = result.exceptionOrNull()?.let { "Не удалось обновить: ${it.message}" }
+                if (result.isSuccess) toast("Подтвердите установку в окне Android")
+                if (!isFinishing) build()
             }
         }.start()
     }
