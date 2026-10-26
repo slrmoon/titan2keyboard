@@ -40,6 +40,7 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         prefs = Prefs(this)
         store = LayoutStore(this)
         Languages.get(this).ensure("ru")
@@ -60,6 +61,20 @@ class SettingsActivity : Activity() {
 
     private fun build() {
         root.removeAllViews()
+
+        // --- last error, if any ---
+        CrashLog.read(this)?.let { report ->
+            section("Была ошибка")
+            note(report.lineSequence().take(2).joinToString(" · "))
+            row(
+                button("Скопировать отчёт") {
+                    getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Clack error", report))
+                    toast("Отчёт скопирован — пришлите его разработчику")
+                },
+                button("Очистить") { CrashLog.clear(this); build() }
+            )
+        }
 
         // --- enable ---
         val enabled = isEnabledIme()

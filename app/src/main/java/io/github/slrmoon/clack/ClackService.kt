@@ -97,6 +97,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         prefs = Prefs(this)
         store = LayoutStore(this)
         languages = Languages.get(this)
@@ -566,8 +567,11 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         composing.setLength(0)
         ic.commitText(final + separator, 1)
         lastAutoCorrect = if (final != typed) AutoCorrection(typed, final, separator) else null
-        if (final == typed && Tokenizer.normalize(typed) == keepAsTyped) {
-            withLang { it.user.addWord(keepAsTyped!!) }
+        val kept = keepAsTyped
+        if (kept != null && final == typed && Tokenizer.normalize(typed) == kept) {
+            // The user undid the correction and kept their word: remember it. Pass the value, not the
+            // field — this runs later on another thread, after keepAsTyped has been cleared.
+            withLang { it.user.addWord(kept) }
             keepAsTyped = null
         }
         learn(final, contextFor(ic, excludeTail = final.length + separator.length))

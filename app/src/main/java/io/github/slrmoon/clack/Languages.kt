@@ -27,7 +27,16 @@ class Languages private constructor(private val context: Context) {
 
     private val langs = ConcurrentHashMap<String, Lang>()
     private val loading = ConcurrentHashMap.newKeySet<String>()
-    val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "clack-lang").apply { priority = Thread.NORM_PRIORITY - 1 } }
+    /**
+     * All dictionary work runs here. An exception in one task is recorded and the thread is
+     * replaced; it never takes the keyboard down.
+     */
+    val worker: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "clack-lang").apply {
+            priority = Thread.NORM_PRIORITY - 1
+            setUncaughtExceptionHandler { t, e -> CrashLog.record(e, fatal = false, where = t.name) }
+        }
+    }
 
     fun get(code: String): Lang? = langs[code]
 
