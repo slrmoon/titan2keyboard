@@ -67,7 +67,8 @@ class InputLogicTest {
         val s = Shortcut(setOf(Mod.CTRL, Mod.SHIFT), "KEYCODE_SPACE")
         assertEquals(s, Shortcut.parse(s.serialize()))
         assertEquals("Shift+Ctrl+Space", s.label())
-        assertTrue(Shortcut.DEFAULTS.any { it.matches(setOf(Mod.FN), "KEYCODE_SPACE") })
+        assertTrue(Shortcut.DEFAULTS.any { it.matches(setOf(Mod.CTRL), "KEYCODE_SPACE") })
+        assertFalse(Shortcut.DEFAULTS.any { it.matches(setOf(Mod.ALT), "KEYCODE_SPACE") })
         assertFalse(s.matches(setOf(Mod.CTRL), "KEYCODE_SPACE"))
     }
 

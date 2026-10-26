@@ -40,6 +40,12 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".LayoutEditorActivity"
+            android:exported="false"
+            android:label="Раскладка"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".AppPickerActivity"
             android:exported="false"
             android:excludeFromRecents="true"

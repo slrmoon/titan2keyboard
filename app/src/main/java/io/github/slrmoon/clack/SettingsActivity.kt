@@ -92,7 +92,7 @@ class SettingsActivity : Activity() {
         val order = prefs.enabledLayouts.toMutableList()
         val sorted = all.sortedBy { e -> order.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } }
         for (e in sorted) root.addView(layoutRow(e, order))
-        row(button("Импорт раскладки…") { pick(REQ_LAYOUT) })
+        row(button("Создать раскладку…") { createLayout(all) }, button("Импорт JSON…") { pick(REQ_LAYOUT) })
         if (store.hasCustomAltLayer()) {
             row(button("Alt-слой: свой ✓  (сбросить)") { store.resetAltLayer(); touch(); build() })
         } else {
@@ -102,11 +102,11 @@ class SettingsActivity : Activity() {
         // --- switching ---
         section("Смена раскладки")
         val current = prefs.switchShortcuts
-        val label = if (current == Shortcut.DEFAULTS) "Fn+Space (или Alt+Space)" else current.joinToString(", ") { it.label() }
+        val label = if (current == Shortcut.DEFAULTS) "Ctrl+Space" else current.joinToString(", ") { it.label() }
         note("Сейчас: $label. Также: тап по метке языка на полоске подсказок.")
         row(
             button("Записать сочетание") { recordShortcut() },
-            button("По умолчанию") { prefs.resetSwitchShortcut(); build() }
+            button("Ctrl+Space") { prefs.resetSwitchShortcut(); build() }
         )
 
         // --- typing ---
@@ -163,7 +163,11 @@ class SettingsActivity : Activity() {
     private fun layoutRow(e: LayoutStore.Entry, order: MutableList<String>): View {
         val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val check = CheckBox(this).apply {
-            text = e.name + if (e.imported) "  (импорт)" else ""
+            text = e.name + when (e.origin) {
+                LayoutStore.Origin.MODIFIED -> "  (изменена)"
+                LayoutStore.Origin.USER -> "  (своя)"
+                else -> ""
+            }
             isChecked = e.id in order
             setOnCheckedChangeListener { _, on ->
                 val list = prefs.enabledLayouts.toMutableList()
@@ -180,12 +184,32 @@ class SettingsActivity : Activity() {
             line.addView(iconButton("↑") { move(e.id, -1) })
             line.addView(iconButton("↓") { move(e.id, +1) })
         }
-        if (e.imported) line.addView(iconButton("✕") {
-            store.delete(e.id)
-            prefs.enabledLayouts = prefs.enabledLayouts.filter { it != e.id }.ifEmpty { listOf("qwerty") }
-            build()
-        })
+        line.addView(iconButton("✎") { startActivity(LayoutEditorActivity.edit(this, e.id)) })
+        when (e.origin) {
+            LayoutStore.Origin.USER -> line.addView(iconButton("✕") {
+                AlertDialog.Builder(this).setMessage("Удалить раскладку «${e.name}»?")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        store.delete(e.id)
+                        prefs.enabledLayouts = prefs.enabledLayouts.filter { it != e.id }.ifEmpty { listOf("qwerty") }
+                        touch(); build()
+                    }.setNegativeButton("Отмена", null).show()
+            })
+            LayoutStore.Origin.MODIFIED -> line.addView(iconButton("↺") {
+                AlertDialog.Builder(this).setMessage("Вернуть исходную «${e.name}»? Ваши правки пропадут.")
+                    .setPositiveButton("Вернуть") { _, _ -> store.delete(e.id); touch(); build() }
+                    .setNegativeButton("Отмена", null).show()
+            })
+            else -> {}
+        }
         return line
+    }
+
+    private fun createLayout(all: List<LayoutStore.Entry>) {
+        val names = arrayOf("Пустая") + all.map { "Копия: ${it.name}" }
+        AlertDialog.Builder(this).setTitle("Новая раскладка")
+            .setItems(names) { _, which ->
+                startActivity(LayoutEditorActivity.create(this, if (which == 0) null else all[which - 1].id))
+            }.show()
     }
 
     private fun move(id: String, delta: Int) {
@@ -200,7 +224,7 @@ class SettingsActivity : Activity() {
 
     private fun recordShortcut() {
         val msg = TextView(this).apply {
-            text = "Нажмите сочетание на физической клавиатуре (например Fn+Space или Ctrl+Space)…"
+            text = "Нажмите сочетание на физической клавиатуре (например Ctrl+Space)…"
             setPadding(dp(24), dp(16), dp(24), dp(16))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         }

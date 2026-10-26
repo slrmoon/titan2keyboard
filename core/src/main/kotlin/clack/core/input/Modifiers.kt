@@ -75,8 +75,8 @@ data class Shortcut(val mods: Set<Mod>, val keyName: String) {
     }
 
     companion object {
-        /** Fn+Space; Alt+Space is accepted too because some devices label their Alt key "Fn". */
-        val DEFAULTS = listOf(Shortcut(setOf(Mod.FN), "KEYCODE_SPACE"), Shortcut(setOf(Mod.ALT), "KEYCODE_SPACE"))
+        /** Ctrl+Space; Fn+Space works too on devices that report a real Fn key. */
+        val DEFAULTS = listOf(Shortcut(setOf(Mod.CTRL), "KEYCODE_SPACE"), Shortcut(setOf(Mod.FN), "KEYCODE_SPACE"))
 
         fun parse(s: String): Shortcut? {
             val parts = s.split('|')
