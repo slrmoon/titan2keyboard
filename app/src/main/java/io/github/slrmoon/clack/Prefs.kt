@@ -54,6 +54,11 @@ class Prefs(context: Context) {
         get() = runCatching { LongPress.valueOf(sp.getString(K_LONG_PRESS, LongPress.ALT.name)!!) }.getOrDefault(LongPress.ALT)
         set(v) = sp.edit().putString(K_LONG_PRESS, v.name).apply()
 
+    /** SYM, then a letter: open the app assigned to that key (or a list of apps on that letter). */
+    var quickLaunch: Boolean
+        get() = sp.getBoolean(K_QUICK_LAUNCH, true)
+        set(v) = sp.edit().putBoolean(K_QUICK_LAUNCH, v).apply()
+
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
@@ -70,5 +75,6 @@ class Prefs(context: Context) {
         private const val K_LEARN = "learn"
         private const val K_LONG_PRESS = "long_press"
         private const val K_MULTITAP = "multitap_ms"
+        private const val K_QUICK_LAUNCH = "quick_launch"
     }
 }

@@ -17,6 +17,7 @@ import clack.core.CandidateKind
 import clack.core.SuggestionEngine
 import clack.core.Suggestions
 import clack.core.input.Mod
+import clack.core.launch.AppFilter
 import clack.core.input.MultiTapTracker
 import clack.core.input.StickyModifier
 import clack.core.layout.AltLayer
@@ -81,8 +82,15 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     }
 
     /** What kind of field we are typing into. */
-    private data class Field(val suggest: Boolean, val autoCorrect: Boolean, val learn: Boolean, val compose: Boolean, val numeric: Boolean) {
-        companion object { val NONE = Field(false, false, false, false, false) }
+    private data class Field(
+        val suggest: Boolean, val autoCorrect: Boolean, val learn: Boolean, val compose: Boolean, val numeric: Boolean,
+        /** No text editor (home screen, terminals, games): every key goes to the app untouched. */
+        val raw: Boolean = false
+    ) {
+        companion object {
+            val NONE = Field(false, false, false, false, false)
+            val RAW = Field(false, false, false, false, false, raw = true)
+        }
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -128,10 +136,10 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         return v
     }
 
-    /** Show the bar even though a hardware keyboard is attached. */
+    /** Show the bar even though a hardware keyboard is attached — but only over real text fields. */
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        return true
+        return !field.raw
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
@@ -146,6 +154,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         multiTap.reset()
         shift.reset(); alt.reset()
         field = classify(attribute)
+        updateInputViewShown()
         updateAutoShift()
         showFor(Mode.NEXT)
     }
@@ -158,6 +167,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     private fun classify(info: EditorInfo): Field {
         val type = info.inputType
+        if (type == InputType.TYPE_NULL) return Field.RAW
         val cls = type and InputType.TYPE_MASK_CLASS
         val variation = type and InputType.TYPE_MASK_VARIATION
         if (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE || cls == InputType.TYPE_CLASS_DATETIME) {
@@ -186,8 +196,14 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     // ------------------------------------------------------------------ keys
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         val name = KeyEvent.keyCodeToString(keyCode)
+        // SYM, then a letter: works wherever the keyboard gets keys, text field or not.
+        if (handleQuickLaunch(keyCode, name, event)) {
+            consumedKeys.add(keyCode)
+            return true
+        }
+        val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
+        if (field.raw) return super.onKeyDown(keyCode, event)
 
         when (keyCode) {
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> {
@@ -230,6 +246,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (consumedKeys.remove(keyCode)) return true
+        if (field.raw) return super.onKeyUp(keyCode, event)
         when (keyCode) {
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> {
                 val before = shift.mode
@@ -249,8 +267,58 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             }
             KeyEvent.KEYCODE_FUNCTION -> fnHeld = false
         }
-        if (consumedKeys.remove(keyCode)) return true
         return super.onKeyUp(keyCode, event)
+    }
+
+    // ------------------------------------------------------------------ SYM + letter quick launch
+
+    private var symArmed = false
+    private val symTimeout = Runnable { disarmSym() }
+    private val symHint = Runnable {
+        if (symArmed) Toast.makeText(this, "SYM: нажмите букву приложения", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Returns true when the key was used by quick launch. */
+    private fun handleQuickLaunch(keyCode: Int, name: String, event: KeyEvent): Boolean {
+        if (!prefs.quickLaunch) return false
+        if (keyCode == KeyEvent.KEYCODE_SYM) {
+            if (event.repeatCount == 0) { if (symArmed) disarmSym() else armSym() }
+            return true
+        }
+        if (!symArmed) return false
+        if (isModifierKey(keyCode) || keyCode in SHIFT_ALT_FN) return false // keep waiting for the letter
+        if (event.repeatCount > 0) return true
+        disarmSym()
+        if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+            currentInputConnection?.let { if (!field.raw) finishComposing(it) }
+            quickLaunch(name)
+            return true
+        }
+        // Esc or Space just cancel; any other key cancels and then works as usual
+        return keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_SPACE
+    }
+
+    private fun armSym() {
+        symArmed = true
+        main.removeCallbacks(symTimeout); main.removeCallbacks(symHint)
+        main.postDelayed(symTimeout, SYM_TIMEOUT_MS)
+        main.postDelayed(symHint, SYM_HINT_DELAY_MS)
+        updateBarChrome()
+    }
+
+    private fun disarmSym() {
+        symArmed = false
+        main.removeCallbacks(symTimeout); main.removeCallbacks(symHint)
+        updateBarChrome()
+    }
+
+    private fun quickLaunch(keyName: String) {
+        val launcher = AppLauncher(this)
+        val app = launcher.assigned(keyName)
+        if (app != null && launcher.launch(app)) return
+        val letters = AppFilter.lettersForKey(keyName, layouts.ifEmpty { listOfNotNull(layout) })
+        runCatching { startActivity(AppPickerActivity.intent(this, keyName, letters)) }
+            .onFailure { Toast.makeText(this, "Не удалось открыть список приложений", Toast.LENGTH_SHORT).show() }
     }
 
     private fun isModifierKey(k: Int) = k == KeyEvent.KEYCODE_CTRL_LEFT || k == KeyEvent.KEYCODE_CTRL_RIGHT ||
@@ -709,6 +777,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             shift.mode == StickyModifier.Mode.LOCKED -> parts.add("⇪")
             shift.active || autoShift -> parts.add("⇧")
         }
+        if (symArmed) parts.add("SYM")
         when (alt.mode) {
             StickyModifier.Mode.LOCKED -> parts.add("ALT")
             StickyModifier.Mode.ONESHOT -> parts.add("alt")
@@ -726,6 +795,12 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     companion object {
         private const val DOUBLE_SPACE_MS = 600L
+        private const val SYM_TIMEOUT_MS = 5000L
+        private const val SYM_HINT_DELAY_MS = 500L
+        private val SHIFT_ALT_FN = setOf(
+            KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT,
+            KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT, KeyEvent.KEYCODE_FUNCTION
+        )
         private const val OWN_EDIT_ECHO_MS = 400L
     }
 }

@@ -107,6 +107,23 @@ class SettingsActivity : Activity() {
         spinner("Повторное нажатие (мульти-тап)", tapOptions.map { "$it мс" },
             tapOptions.indexOf(prefs.multiTapMs).coerceAtLeast(1)) { prefs.multiTapMs = tapOptions[it] }
 
+        // --- quick launch ---
+        section("Быстрый запуск: SYM, затем буква")
+        note("Нажмите SYM, отпустите и в течение 5 секунд нажмите букву. Если на неё назначено приложение — оно откроется, иначе появится список приложений на эту букву (в любой раскладке: T — и «Telegram», и «Еда»). Долгое нажатие в списке назначает приложение на букву. Работает и на рабочем столе.")
+        switch("Включено", prefs.quickLaunch) { prefs.quickLaunch = it }
+        val launcher = AppLauncher(this)
+        val assignments = launcher.assignments()
+        if (assignments.isEmpty()) note("Пока ничего не назначено.")
+        for ((key, app) in assignments) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            line.addView(TextView(this).apply {
+                text = "SYM+${AppLauncher.keyLabel(key)}  →  ${app.label}"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            line.addView(iconButton("✕") { launcher.unassign(key); build() })
+            root.addView(line)
+        }
+
         // --- learning ---
         section("Мой словарь")
         note("Импорт переписки из Telegram Desktop (Настройки → Продвинутые → Экспорт данных, формат JSON, файл result.json). Клавиатура запомнит ваши слова и какие слова вы пишете друг за другом. Всё остаётся на телефоне.")
