@@ -68,7 +68,10 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private val composing = StringBuilder()
     /** Word right before the cursor that we show suggestions for without composing it (after backspace or cursor move). */
     private var peekWord: String? = null
-    private var lastSpaceAuto = false        // space was inserted by a suggestion/auto-correction
+    /** The space before the cursor directly follows a word, so ".,!?:;" may take its place ("слово ," → "слово, "). */
+    private var lastSpaceAuto = false
+    /** We inserted the space before the cursor ourselves; a Space press right after it adds nothing. */
+    private var swallowNextSpace = false
     private var lastSpaceAt = 0L
     private var lastAutoCorrect: AutoCorrection? = null
     private var keepAsTyped: String? = null  // user undid a correction of this word: don't correct it again
@@ -178,6 +181,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         lastAutoCorrect = null
         keepAsTyped = null
         lastSpaceAuto = false
+        swallowNextSpace = false
         multiTap.reset()
         shift.reset(); alt.reset(); ctrl.reset()
         symPage = 0
@@ -590,6 +594,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private fun typeLetters(ic: InputConnection, s: String) {
         markEdit()
         lastSpaceAuto = false
+        swallowNextSpace = false
         lastAutoCorrect = null
         if (!field.compose) {
             ic.commitText(s, 1)
@@ -658,19 +663,30 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             if (before?.toString() == " ") {
                 ic.deleteSurroundingText(1, 0)
                 ic.commitText("$s ", 1)
-                lastSpaceAuto = true
+                lastSpaceAuto = false
+                swallowNextSpace = true // the user's own Space after the comma must not double it
                 afterCommit(ic)
                 return
             }
         }
         ic.commitText(s, 1)
         lastSpaceAuto = false
+        swallowNextSpace = false
         afterCommit(ic)
     }
 
     private fun onSpace(ic: InputConnection, now: Long) {
         markEdit()
         multiTap.reset()
+        // We just put a space there ourselves (after a picked suggestion or a moved comma): don't add another.
+        if (swallowNextSpace && composing.isEmpty()) {
+            swallowNextSpace = false
+            if (ic.getTextBeforeCursor(1, 0)?.toString() == " ") {
+                lastSpaceAt = 0 // and don't let it count towards "double space → period"
+                return
+            }
+        }
+        swallowNextSpace = false
         // double space → ". "
         if (prefs.doubleSpacePeriod && composing.isEmpty() && now - lastSpaceAt < DOUBLE_SPACE_MS) {
             val before = ic.getTextBeforeCursor(2, 0)?.toString()
@@ -679,6 +695,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                 ic.commitText(". ", 1)
                 lastSpaceAt = 0
                 lastSpaceAuto = false
+                swallowNextSpace = false
                 afterCommit(ic)
                 return
             }
@@ -687,7 +704,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         commitWord(ic, autoCorrect = true, separator = " ")
         if (!hadWord) ic.commitText(" ", 1)
         lastSpaceAt = now
-        lastSpaceAuto = false
+        // a space typed right after a word: punctuation that follows may replace it
+        lastSpaceAuto = hadWord
         afterCommit(ic)
     }
 
@@ -725,6 +743,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             }
         }
         lastSpaceAuto = false
+        swallowNextSpace = false
         // Let the app delete (handles selections, key repeat, emoji). The resulting selection
         // update is not ours, so onUpdateSelection refreshes suggestions for the word at the cursor.
         return false
@@ -816,6 +835,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         }
         lastAutoCorrect = null
         lastSpaceAuto = false
+        swallowNextSpace = false
         multiTap.reset()
         updateAutoShift()
         if (newSelStart == newSelEnd) refreshPeek() else showFor(Mode.NEXT)
@@ -934,6 +954,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         }
         lastAutoCorrect = null
         lastSpaceAuto = true
+        swallowNextSpace = true // we added the space; the habitual Space press after picking adds nothing
         shift.consumeOneShot()
         afterCommit(ic)
     }
