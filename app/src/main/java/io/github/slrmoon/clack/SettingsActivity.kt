@@ -149,6 +149,7 @@ class SettingsActivity : Activity() {
         switch("Автоисправление на пробеле", prefs.autoCorrect) { prefs.autoCorrect = it }
         switch("Заглавная в начале предложения", prefs.autoCapitalize) { prefs.autoCapitalize = it }
         switch("Двойной пробел → точка", prefs.doubleSpacePeriod) { prefs.doubleSpacePeriod = it }
+        switch("Пробел после , . ! ? : ; (сразу после слова)", prefs.spaceAfterPunctuation) { prefs.spaceAfterPunctuation = it }
         switch("Учиться на том, что я пишу", prefs.learn) { prefs.learn = it }
         spinner("Долгое нажатие на букву", listOf("Ничего", "Заглавная", "Символ Alt"),
             Prefs.LongPress.values().indexOf(prefs.longPress)) { prefs.longPress = Prefs.LongPress.values()[it] }

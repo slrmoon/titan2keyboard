@@ -317,9 +317,15 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                     // automatic capital was pending: a Shift tap cancels it instead of adding another
                     shift.reset()
                     autoShift = false
+                    notifyIfNoBar("Shift выкл")
                 } else if (shift.mode == StickyModifier.Mode.OFF) autoShift = false
-                if (before != shift.mode && (before == StickyModifier.Mode.LOCKED || shift.mode == StickyModifier.Mode.LOCKED))
-                    notifyIfNoBar(if (shift.mode == StickyModifier.Mode.LOCKED) "⇪ Caps Lock" else "Caps Lock выкл")
+                val now = shift.mode
+                when {
+                    now == StickyModifier.Mode.LOCKED && before != now -> notifyIfNoBar("⇪ Caps Lock")
+                    now == StickyModifier.Mode.ONESHOT && before != now -> notifyIfNoBar("⇧ Shift")
+                    now == StickyModifier.Mode.OFF && before == StickyModifier.Mode.LOCKED -> notifyIfNoBar("Caps Lock выкл")
+                    now == StickyModifier.Mode.OFF && before != now -> notifyIfNoBar("Shift выкл")
+                }
                 updateBarChrome()
                 return true
             }
@@ -656,9 +662,10 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             return
         }
         val punct = s.length == 1 && s[0] in ".,!?:;"
-        if (composing.isNotEmpty()) commitWord(ic, autoCorrect = punct)
-        if (punct && lastSpaceAuto) {
-            // "слово ," → "слово, "
+        val afterWord = composing.isNotEmpty()
+        if (afterWord) commitWord(ic, autoCorrect = punct)
+        if (punct && (lastSpaceAuto || swallowNextSpace)) {
+            // "слово ," → "слово, "; also "слово? !" → "слово?! " when we put that space there
             val before = ic.getTextBeforeCursor(1, 0)
             if (before?.toString() == " ") {
                 ic.deleteSurroundingText(1, 0)
@@ -668,6 +675,14 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                 afterCommit(ic)
                 return
             }
+        }
+        if (punct && afterWord && prefs.spaceAfterPunctuation) {
+            // "слово" + "," → "слово, " — a habitual Space right after adds nothing
+            ic.commitText("$s ", 1)
+            lastSpaceAuto = false
+            swallowNextSpace = true
+            afterCommit(ic)
+            return
         }
         ic.commitText(s, 1)
         lastSpaceAuto = false
@@ -695,14 +710,13 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                 ic.commitText(". ", 1)
                 lastSpaceAt = 0
                 lastSpaceAuto = false
-                swallowNextSpace = false
+                swallowNextSpace = true
                 afterCommit(ic)
                 return
             }
         }
         val hadWord = composing.isNotEmpty()
-        commitWord(ic, autoCorrect = true, separator = " ")
-        if (!hadWord) ic.commitText(" ", 1)
+        if (hadWord) commitWord(ic, autoCorrect = true, separator = " ") else ic.commitText(" ", 1)
         lastSpaceAt = now
         // a space typed right after a word: punctuation that follows may replace it
         lastSpaceAuto = hadWord
