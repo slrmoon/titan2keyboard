@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Settings and editors -->
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight" />
+
     <!-- Floating window for the SYM+letter app picker -->
     <style name="PickerTheme" parent="@android:style/Theme.DeviceDefault.Light.Dialog.NoActionBar">
         <item name="android:windowMinWidthMajor">90%</item>
