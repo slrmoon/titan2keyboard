@@ -90,7 +90,7 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
 
     companion object {
-        const val DEFAULT_LAYOUTS = "russian_jcuken,qwerty"
+        const val DEFAULT_LAYOUTS = "russian_translit"
         private const val K_LAYOUTS = "layouts"
         private const val K_CURRENT = "current_layout"
         private const val K_SHORTCUT = "switch_shortcut"

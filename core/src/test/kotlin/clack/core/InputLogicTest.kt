@@ -38,6 +38,12 @@ class InputLogicTest {
         assertEquals("en", en.language)
         assertEquals(listOf("ь", "б", "ю"), ru.mappings["KEYCODE_M"]!!.outputs.map { it.lower })
         assertEquals("0", TestData.altLayer()["KEYCODE_Q"])
+        val tr = TestData.layout("russian_translit")
+        assertEquals("ru", tr.language)
+        assertEquals(listOf("м", "ь", "ъ"), tr.mappings["KEYCODE_M"]!!.outputs.map { it.lower })
+        assertEquals(listOf("щ"), tr.mappings["KEYCODE_W"]!!.outputs.map { it.lower })
+        val trLetters = tr.mappings.values.flatMap { m -> m.outputs.map { it.lower } }.toSet()
+        for (c in "абвгдежзийклмнопрстуфхцчшщъыьэюя") assertTrue("translit missing $c", c.toString() in trLetters)
         // every Russian letter is reachable
         val letters = ru.mappings.values.flatMap { m -> m.outputs.map { it.lower } }.toSet()
         for (c in "абвгдеёжзийклмнопрстуфхцчшщъыьэюя") assertTrue("missing $c", c.toString() in letters)

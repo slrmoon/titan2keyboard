@@ -43,14 +43,18 @@ class KeyGeometry(private val positions: Map<String, Pair<Double, Double>>) {
 class TypoModel(layout: KeyboardLayout, private val geometry: KeyGeometry) : Trie.EditCosts {
     private data class Slot(val keyName: String, val tap: Int)
 
-    private val slots: Map<Char, Slot>
+    /** Every key a letter can come from (a layout may put the same letter on two keys). */
+    private val slots: Map<Char, List<Slot>>
+    private val cache = HashMap<Long, Float>()
 
     init {
-        val m = HashMap<Char, Slot>()
+        val m = HashMap<Char, MutableList<Slot>>()
         for ((keyName, mapping) in layout.mappings) {
             mapping.outputs.forEachIndexed { tap, out ->
                 for (s in listOf(out.lower, out.upper)) {
-                    if (s.length == 1) m.putIfAbsent(s[0].lowercaseChar(), Slot(keyName, tap))
+                    if (s.length != 1) continue
+                    val list = m.getOrPut(s[0].lowercaseChar()) { ArrayList(1) }
+                    if (list.none { it.keyName == keyName }) list.add(Slot(keyName, tap))
                 }
             }
         }
@@ -63,16 +67,28 @@ class TypoModel(layout: KeyboardLayout, private val geometry: KeyGeometry) : Tri
         val b = typed.lowercaseChar()
         if (a == b) return 0f
         if (isYoPair(a, b)) return YO_COST
-        val sa = slots[a]
-        val sb = slots[b]
-        if (sa == null || sb == null) return FAR_COST
-        if (sa.keyName == sb.keyName) return SAME_KEY_COST // wrong number of multi-taps
-        val d = geometry.distance(sa.keyName, sb.keyName) ?: return FAR_COST
-        return when {
-            d <= 1.2 -> NEIGHBOR_COST
-            d <= 2.1 -> NEAR_COST
-            else -> FAR_COST
+        val key = (a.code.toLong() shl 32) or b.code.toLong()
+        synchronized(cache) { cache[key] }?.let { return it }
+        val la = slots[a]
+        val lb = slots[b]
+        var best = FAR_COST
+        if (la != null && lb != null) {
+            for (sa in la) for (sb in lb) {
+                val c = if (sa.keyName == sb.keyName) SAME_KEY_COST // wrong number of multi-taps
+                else {
+                    val d = geometry.distance(sa.keyName, sb.keyName)
+                    when {
+                        d == null -> FAR_COST
+                        d <= 1.2 -> NEIGHBOR_COST
+                        d <= 2.1 -> NEAR_COST
+                        else -> FAR_COST
+                    }
+                }
+                if (c < best) best = c
+            }
         }
+        synchronized(cache) { cache[key] = best }
+        return best
     }
 
     /** Cost of an extra typed character [extra] next to [neighbor] (the intended letter beside it). */

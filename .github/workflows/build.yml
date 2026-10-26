@@ -45,7 +45,7 @@ jobs:
         run: |
           apk=app/build/outputs/apk/release/app-release.apk
           unzip -l "$apk" > contents.txt
-          for f in assets/dict/ru.tsv assets/dict/en.tsv assets/layouts/russian_jcuken.json assets/layouts/qwerty.json assets/alt/titan2.json; do
+          for f in assets/dict/ru.tsv assets/dict/en.tsv assets/layouts/russian_jcuken.json assets/layouts/qwerty.json assets/layouts/russian_translit.json assets/alt/titan2.json; do
             grep -qE " ${f}(\.gz)?$" contents.txt || { echo "::error::$f missing from APK"; exit 1; }
           done
           echo "APK size: $(stat -c%s "$apk") bytes"

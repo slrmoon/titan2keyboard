@@ -101,6 +101,28 @@ class SuggestionEngineTest {
         assertEquals("кино", s.autoCorrect?.word)
     }
 
+    @Test fun translitLayoutFixesItsOwnNeighbours() {
+        val e = clack.core.SuggestionEngine(TestData.ruTrie, UserModel(),
+            clack.core.typo.TypoModel(TestData.layout("russian_translit"), clack.core.typo.KeyGeometry.TITAN2))
+        // translit: и on I, у on U (neighbours); е on E, д on D (neighbours)
+        assertEquals("прувет", "привет", autoFix(e, "прувет"))
+        assertEquals("привдт", "привет", autoFix(e, "привдт"))
+        // multi-tap slip: а and я share a key
+        assertEquals("приатная", "приятная", autoFix(e, "приатная"))
+    }
+
+    @Test fun letterOnTwoKeysUsesTheCloserOne() {
+        // a layout may put one letter on two keys: the cost uses whichever key is closer
+        val json = """{"name":"t","mappings":{
+            "KEYCODE_Q":{"lowercase":"x","uppercase":"X"},
+            "KEYCODE_M":{"lowercase":"x","uppercase":"X"},
+            "KEYCODE_W":{"lowercase":"a","uppercase":"A"},
+            "KEYCODE_N":{"lowercase":"b","uppercase":"B"}}}"""
+        val m = clack.core.typo.TypoModel(clack.core.layout.KeyboardLayout.parse("t", json), clack.core.typo.KeyGeometry.TITAN2)
+        assertEquals(clack.core.typo.TypoModel.NEIGHBOR_COST, m.substitution('x', 'a')) // via Q–W
+        assertEquals(clack.core.typo.TypoModel.NEIGHBOR_COST, m.substitution('x', 'b')) // via M–N
+    }
+
     @Test fun englishWorksToo() {
         val e = TestData.enEngine()
         assertEquals("hello", autoFix(e, "hrllo"))
