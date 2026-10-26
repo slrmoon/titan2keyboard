@@ -48,10 +48,6 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    androidResources {
-        // dictionaries are already gzip-compressed
-        noCompress += "gz"
-    }
 }
 
 dependencies {

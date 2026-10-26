@@ -38,9 +38,7 @@ class Languages private constructor(private val context: Context) {
         worker.execute {
             try {
                 val t0 = System.currentTimeMillis()
-                val words = runCatching {
-                    context.assets.open("dict/$code.tsv.gz").use { GZIPInputStream(it).bufferedReader().use(WordList::read) }
-                }.getOrElse { emptyMap() }
+                val words = readWordList(code)
                 val trie = Trie.build(words)
                 val user = UserModel()
                 val f = file(code)
@@ -85,6 +83,17 @@ class Languages private constructor(private val context: Context) {
         for (l in langs.values) { l.user.clear(); l.engine.refreshUserIndex() }
         context.filesDir.listFiles { f -> f.name.startsWith("user_") }?.forEach { it.delete() }
         for (l in langs.values) l.savedVersion = l.user.version
+    }
+
+    /**
+     * The build tools unpack "*.tsv.gz" assets and store them as "*.tsv" (compressed inside the APK
+     * anyway), so look for the plain name first and fall back to the gzipped one.
+     */
+    private fun readWordList(code: String): Map<String, Float> {
+        runCatching { return context.assets.open("dict/$code.tsv").bufferedReader().use(WordList::read) }
+        runCatching { return context.assets.open("dict/$code.tsv.gz").use { GZIPInputStream(it).bufferedReader().use(WordList::read) } }
+        Log.e(TAG, "no dictionary for $code")
+        return emptyMap()
     }
 
     private fun file(code: String) = File(context.filesDir, "user_$code.tsv")
