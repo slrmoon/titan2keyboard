@@ -75,7 +75,7 @@ class Languages private constructor(private val context: Context) {
     /** Write learned data of every language that changed. Runs on the worker. */
     fun saveAsync() = worker.execute { saveNow() }
 
-    fun saveNow() {
+    @Synchronized fun saveNow() {
         for (l in langs.values) {
             if (l.user.version == l.savedVersion) continue
             val f = file(l.code)
