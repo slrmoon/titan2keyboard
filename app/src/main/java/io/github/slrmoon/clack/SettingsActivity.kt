@@ -160,7 +160,18 @@ class SettingsActivity : Activity() {
         switch("Заглавная в начале предложения", prefs.autoCapitalize) { prefs.autoCapitalize = it }
         switch("Двойной пробел → точка", prefs.doubleSpacePeriod) { prefs.doubleSpacePeriod = it }
         switch("Пробел после , . ! ? : ; (сразу после слова)", prefs.spaceAfterPunctuation) { prefs.spaceAfterPunctuation = it }
-        switch("Двойной Backspace удаляет слово целиком", prefs.doubleBackspaceWord) { prefs.doubleBackspaceWord = it }
+        spinner("Удаление слова Backspace", listOf("Выключено", "Двойное нажатие", "Удержание"),
+            Prefs.WordDelete.values().indexOf(prefs.wordDelete)) {
+            val mode = Prefs.WordDelete.values()[it]
+            if (mode != prefs.wordDelete) { prefs.wordDelete = mode; root.post { build() } }
+        }
+        if (prefs.wordDelete == Prefs.WordDelete.DOUBLE_PRESS) {
+            val gaps = listOf(250, 350, 500, 700)
+            spinner("Интервал двойного нажатия", gaps.map { "$it мс" },
+                gaps.indexOf(prefs.doubleBackspaceMs).let { if (it < 0) 1 else it }) { prefs.doubleBackspaceMs = gaps[it] }
+            note("Меньше — сложнее случайно стереть слово, когда быстро удаляете буквы; больше — проще попасть.")
+        }
+        if (prefs.wordDelete == Prefs.WordDelete.HOLD) note("Короткое нажатие стирает букву, удержание — слова, по одному.")
         switch("Учиться на том, что я пишу", prefs.learn) { prefs.learn = it }
         spinner("Долгое нажатие на букву", listOf("Ничего", "Заглавная", "Символ Alt"),
             Prefs.LongPress.values().indexOf(prefs.longPress)) { prefs.longPress = Prefs.LongPress.values()[it] }

@@ -755,17 +755,29 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     }
 
     private var lastBackspaceAt = 0L
+    private var lastWordDeleteAt = 0L
 
     private fun onBackspace(ic: InputConnection, event: KeyEvent): Boolean {
         multiTap.reset()
-        // Double Backspace: the second quick press deletes the rest of the word.
-        if (prefs.doubleBackspaceWord && event.repeatCount == 0) {
-            val quick = event.eventTime - lastBackspaceAt <= DOUBLE_BACKSPACE_MS
-            lastBackspaceAt = event.eventTime
-            if (quick && deleteWordBeforeCursor(ic)) {
-                lastBackspaceAt = 0 // a third press starts over
-                return true
+        when (prefs.wordDelete) {
+            // Double press: the second quick press deletes the rest of the word.
+            Prefs.WordDelete.DOUBLE_PRESS -> if (event.repeatCount == 0) {
+                val quick = event.eventTime - lastBackspaceAt <= prefs.doubleBackspaceMs
+                lastBackspaceAt = event.eventTime
+                if (quick && deleteWordBeforeCursor(ic)) {
+                    lastBackspaceAt = 0 // a third press starts over
+                    return true
+                }
             }
+            // Hold: a tap deletes a letter; while held, whole words go, one at a steady pace.
+            Prefs.WordDelete.HOLD -> if (event.repeatCount > 0) {
+                if (event.eventTime - lastWordDeleteAt >= HOLD_WORD_INTERVAL_MS) {
+                    lastWordDeleteAt = event.eventTime
+                    deleteWordBeforeCursor(ic)
+                }
+                return true
+            } else lastWordDeleteAt = event.eventTime // the first word goes after the hold delay
+            Prefs.WordDelete.OFF -> {}
         }
         if (composing.isNotEmpty()) {
             markEdit()
@@ -1083,7 +1095,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     companion object {
         private const val DOUBLE_SPACE_MS = 600L
-        private const val DOUBLE_BACKSPACE_MS = 350L
+        private const val HOLD_WORD_INTERVAL_MS = 300L
         private const val SYM_TIMEOUT_MS = 5000L
         private const val SYM_HINT_DELAY_MS = 500L
         private val SHIFT_ALT_FN = setOf(

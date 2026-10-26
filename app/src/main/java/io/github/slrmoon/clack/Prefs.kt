@@ -85,10 +85,21 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_SPACE_AFTER_PUNCT, true)
         set(v) = sp.edit().putBoolean(K_SPACE_AFTER_PUNCT, v).apply()
 
-    /** Two quick Backspace presses delete the whole word. */
-    var doubleBackspaceWord: Boolean
-        get() = sp.getBoolean(K_DOUBLE_BACKSPACE, false)
-        set(v) = sp.edit().putBoolean(K_DOUBLE_BACKSPACE, v).apply()
+    enum class WordDelete { OFF, DOUBLE_PRESS, HOLD }
+
+    /** How Backspace deletes whole words. Migrates the older on/off switch for double press. */
+    var wordDelete: WordDelete
+        get() {
+            val v = sp.getString(K_WORD_DELETE, null)
+            if (v == null) return if (sp.getBoolean(K_DOUBLE_BACKSPACE, false)) WordDelete.DOUBLE_PRESS else WordDelete.OFF
+            return runCatching { WordDelete.valueOf(v) }.getOrDefault(WordDelete.OFF)
+        }
+        set(v) = sp.edit().putString(K_WORD_DELETE, v.name).apply()
+
+    /** Max time between the two presses of a double Backspace. */
+    var doubleBackspaceMs: Int
+        get() = sp.getInt(K_DOUBLE_BACKSPACE_MS, 350)
+        set(v) = sp.edit().putInt(K_DOUBLE_BACKSPACE_MS, v).apply()
 
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
@@ -109,6 +120,8 @@ class Prefs(context: Context) {
         private const val K_QUICK_LAUNCH = "quick_launch"
         private const val K_SHOW_BAR = "show_bar"
         private const val K_DOUBLE_BACKSPACE = "double_backspace_word"
+        private const val K_WORD_DELETE = "word_delete"
+        private const val K_DOUBLE_BACKSPACE_MS = "double_backspace_ms"
         private const val K_SPACE_AFTER_PUNCT = "space_after_punct"
         private const val K_SYM_EMOJI_FIRST = "sym_emoji_first"
         private const val K_SYM_TAP = "sym_tap_in_text"
