@@ -449,7 +449,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         updateInputViewShown()
         // With the bar hidden the system keeps the keyboard window closed, so open/close it ourselves.
         if (symPage > 0 && !isInputViewShown) requestShowSelf(0)
-        if (symPage == 0 && !prefs.showBar && isInputViewShown) requestHideSelf(0)
+        // (don't test isInputViewShown here: after the panel is gone the view already counts as hidden,
+        // while the empty window is still on screen)
+        if (symPage == 0 && !prefs.showBar) requestHideSelf(0)
     }
 
     private fun closeSymPanel() {
