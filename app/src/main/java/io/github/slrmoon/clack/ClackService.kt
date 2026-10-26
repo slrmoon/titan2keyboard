@@ -20,6 +20,7 @@ import clack.core.input.Mod
 import clack.core.launch.AppFilter
 import clack.core.input.MultiTapTracker
 import clack.core.input.StickyModifier
+import clack.core.input.TextEdits
 import clack.core.layout.AltLayer
 import clack.core.layout.KeyboardLayout
 import clack.core.predict.Tokenizer
@@ -753,8 +754,19 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         afterCommit(ic)
     }
 
+    private var lastBackspaceAt = 0L
+
     private fun onBackspace(ic: InputConnection, event: KeyEvent): Boolean {
         multiTap.reset()
+        // Double Backspace: the second quick press deletes the rest of the word.
+        if (prefs.doubleBackspaceWord && event.repeatCount == 0) {
+            val quick = event.eventTime - lastBackspaceAt <= DOUBLE_BACKSPACE_MS
+            lastBackspaceAt = event.eventTime
+            if (quick && deleteWordBeforeCursor(ic)) {
+                lastBackspaceAt = 0 // a third press starts over
+                return true
+            }
+        }
         if (composing.isNotEmpty()) {
             markEdit()
             val cut = Character.charCount(composing.codePointBefore(composing.length))
@@ -791,6 +803,27 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         // Let the app delete (handles selections, key repeat, emoji). The resulting selection
         // update is not ours, so onUpdateSelection refreshes suggestions for the word at the cursor.
         return false
+    }
+
+    /** Deletes the word (or the rest of it) before the cursor. False when there is a selection or nothing to delete. */
+    private fun deleteWordBeforeCursor(ic: InputConnection): Boolean {
+        markEdit()
+        lastAutoCorrect = null
+        lastSpaceAuto = false
+        swallowNextSpace = false
+        if (composing.isNotEmpty()) {
+            composing.setLength(0)
+            ic.commitText("", 1)
+        }
+        val selected = ic.getSelectedText(0)
+        if (!selected.isNullOrEmpty()) return false
+        val before = ic.getTextBeforeCursor(128, 0) ?: return false
+        val n = TextEdits.wordDeleteLength(before)
+        if (n <= 0) return false
+        ic.deleteSurroundingText(n, 0)
+        updateAutoShift()
+        showFor(Mode.NEXT)
+        return true
     }
 
     /** Commit the word being composed, auto-correcting it if allowed. */
@@ -1050,6 +1083,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     companion object {
         private const val DOUBLE_SPACE_MS = 600L
+        private const val DOUBLE_BACKSPACE_MS = 350L
         private const val SYM_TIMEOUT_MS = 5000L
         private const val SYM_HINT_DELAY_MS = 500L
         private val SHIFT_ALT_FN = setOf(
