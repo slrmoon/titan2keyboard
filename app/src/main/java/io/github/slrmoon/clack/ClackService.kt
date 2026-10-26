@@ -47,12 +47,21 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     private val shift = StickyModifier()
     private val alt = StickyModifier()
+    /** Ctrl is sticky too: tap Ctrl, then Space switches layout, C/V/X/A copy/paste/cut/select all. */
+    private val ctrl = StickyModifier()
     private var autoShift = false
     private val multiTap = MultiTapTracker()
     private var lastTapShift = false
     private var fnHeld = false
 
     private var bar: BarView? = null
+    private var symPanel: SymPanelView? = null
+    /** 0 = SYM panel closed, otherwise the page shown (1 symbols, 2 emoji). */
+    private var symPage = 0
+    private var symPages: List<AltLayer> = emptyList()
+    private var symHeld = false
+    private var symChorded = false
+    private var lastToast: Toast? = null
 
     // --- state of the editor field ---
     private var field = Field.NONE
@@ -124,23 +133,38 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         layout?.let { languages.attachLayout(it) }
         // warm up the other languages too, so switching is instant
         layouts.map { it.language }.distinct().forEach { languages.ensure(it) }
+        symPages = (1..LayoutStore.SYM_PAGES).map { store.symPage(it) }
+        bar?.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
+        if (symPage > 0) renderSymPanel()
+        updateInputViewShown()
         updateBarChrome()
     }
 
     override fun onCreateInputView(): View {
+        val panel = SymPanelView(this,
+            onSymbol = { s -> currentInputConnection?.let { insertFromSymPanel(it, s) } },
+            onPage = { p -> symPage = p; renderSymPanel() },
+            onClose = { closeSymPanel() })
         val v = BarView(this,
             onPick = ::pick,
             onLanguageTap = { switchLayout() },
             onLanguageLongPress = { openSettings() })
         bar = v
+        symPanel = panel
+        panel.visibility = View.GONE
+        v.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
         updateBarChrome()
-        return v
+        return android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(panel)
+            addView(v)
+        }
     }
 
     /** Show the bar even though a hardware keyboard is attached — but only over real text fields. */
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        return !field.raw
+        return !field.raw && (prefs.showBar || symPage > 0)
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
@@ -153,7 +177,10 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         keepAsTyped = null
         lastSpaceAuto = false
         multiTap.reset()
-        shift.reset(); alt.reset()
+        shift.reset(); alt.reset(); ctrl.reset()
+        symPage = 0
+        symHeld = false
+        symPanel?.visibility = View.GONE
         field = classify(attribute)
         updateInputViewShown()
         updateAutoShift()
@@ -198,13 +225,17 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val name = KeyEvent.keyCodeToString(keyCode)
-        // SYM, then a letter: works wherever the keyboard gets keys, text field or not.
-        if (handleQuickLaunch(keyCode, name, event)) {
+        // SYM: symbol panel / quick launch. Works wherever the keyboard gets keys, text field or not.
+        if (handleSym(keyCode, name, event)) {
             consumedKeys.add(keyCode)
             return true
         }
         val ic = currentInputConnection ?: return super.onKeyDown(keyCode, event)
         if (field.raw) return super.onKeyDown(keyCode, event)
+        if (symPage > 0 && handleSymPanelKey(ic, keyCode, name, event)) {
+            consumedKeys.add(keyCode)
+            return true
+        }
 
         when (keyCode) {
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> {
@@ -215,25 +246,43 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                 if (event.repeatCount == 0) alt.onDown()
                 return true
             }
+            KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> {
+                if (event.repeatCount == 0) ctrl.onDown()
+                return true
+            }
             KeyEvent.KEYCODE_FUNCTION -> { fnHeld = true; return super.onKeyDown(keyCode, event) }
         }
         if (isModifierKey(keyCode)) return super.onKeyDown(keyCode, event)
 
         shift.onOtherKeyWhileHeld()
         alt.onOtherKeyWhileHeld()
+        ctrl.onOtherKeyWhileHeld()
 
-        // Layout switch shortcut (Fn+Space by default, configurable).
+        // Layout switch shortcut (Ctrl+Space by default, configurable; Ctrl may be tapped first).
         val held = heldMods(event)
         if (prefs.switchShortcuts.any { it.matches(held, name) }) {
-            if (event.repeatCount == 0) switchLayout()
+            if (event.repeatCount == 0) {
+                switchLayout()
+                ctrl.consumeOneShot()
+                updateBarChrome()
+            }
             consumedKeys.add(keyCode)
             return true
         }
 
-        // Ctrl/Meta shortcuts belong to the app (copy, paste, select all, ...).
+        // Ctrl/Meta held down together with a key: the app handles it (copy, paste, select all, ...).
         if (event.isCtrlPressed || event.isMetaPressed) {
             finishComposing(ic)
             return super.onKeyDown(keyCode, event)
+        }
+
+        // Ctrl tapped before this key: send the combination ourselves.
+        if (ctrl.mode != StickyModifier.Mode.OFF) {
+            sendCtrlCombo(ic, keyCode)
+            ctrl.consumeOneShot()
+            updateBarChrome()
+            consumedKeys.add(keyCode)
+            return true
         }
 
         val handled = when (keyCode) {
@@ -247,6 +296,11 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_SYM && consumedKeys.remove(keyCode)) {
+            symHeld = false
+            if (!symChorded) onSymTap()
+            return true
+        }
         if (consumedKeys.remove(keyCode)) return true
         if (field.raw) return super.onKeyUp(keyCode, event)
         when (keyCode) {
@@ -258,11 +312,22 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                     shift.reset()
                     autoShift = false
                 } else if (shift.mode == StickyModifier.Mode.OFF) autoShift = false
+                if (before != shift.mode && (before == StickyModifier.Mode.LOCKED || shift.mode == StickyModifier.Mode.LOCKED))
+                    notifyIfNoBar(if (shift.mode == StickyModifier.Mode.LOCKED) "⇪ Caps Lock" else "Caps Lock выкл")
                 updateBarChrome()
                 return true
             }
             KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT -> {
+                val before = alt.mode
                 alt.onUp(event.eventTime)
+                if (before != alt.mode) notifyIfNoBar(modeText("Alt", alt.mode))
+                updateBarChrome()
+                return true
+            }
+            KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> {
+                val before = ctrl.mode
+                ctrl.onUp(event.eventTime)
+                if (before != ctrl.mode) notifyIfNoBar(modeText("Ctrl", ctrl.mode))
                 updateBarChrome()
                 return true
             }
@@ -279,11 +344,24 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         if (symArmed) Toast.makeText(this, "SYM: нажмите букву приложения", Toast.LENGTH_SHORT).show()
     }
 
-    /** Returns true when the key was used by quick launch. */
-    private fun handleQuickLaunch(keyCode: Int, name: String, event: KeyEvent): Boolean {
-        if (!prefs.quickLaunch) return false
+    /**
+     * SYM handling. The SYM key itself acts on release (see onKeyUp) so that holding SYM and
+     * pressing a letter can launch an app without opening the panel. Returns true when used.
+     */
+    private fun handleSym(keyCode: Int, name: String, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_SYM) {
-            if (event.repeatCount == 0) { if (symArmed) disarmSym() else armSym() }
+            if (event.repeatCount == 0) { symHeld = true; symChorded = false }
+            return true
+        }
+        if (symHeld && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+            if (event.repeatCount == 0) {
+                symChorded = true
+                if (prefs.quickLaunch) {
+                    currentInputConnection?.let { if (!field.raw) finishComposing(it) }
+                    closeSymPanel()
+                    quickLaunch(name)
+                }
+            }
             return true
         }
         if (!symArmed) return false
@@ -313,6 +391,98 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         updateBarChrome()
     }
 
+    /** SYM pressed and released on its own. */
+    private fun onSymTap() {
+        val inText = !field.raw && currentInputConnection != null
+        if (inText && prefs.symTapInText == Prefs.SymTap.SYMBOLS) {
+            disarmSym()
+            symPage = if (symPage >= LayoutStore.SYM_PAGES) 0 else symPage + 1
+            renderSymPanel()
+        } else if (prefs.quickLaunch) {
+            closeSymPanel()
+            if (symArmed) disarmSym() else armSym()
+        }
+    }
+
+    // ------------------------------------------------------------------ SYM panel
+
+    private fun renderSymPanel() {
+        val panel = symPanel
+        if (symPage <= 0) {
+            panel?.visibility = View.GONE
+        } else if (panel != null) {
+            panel.show(symPage, LayoutStore.SYM_PAGE_NAMES, symPages.getOrElse(symPage - 1) { AltLayer(emptyMap()) })
+            panel.visibility = View.VISIBLE
+        }
+        updateInputViewShown()
+    }
+
+    private fun closeSymPanel() {
+        if (symPage == 0) return
+        symPage = 0
+        renderSymPanel()
+    }
+
+    /** Keys while the SYM panel is open. Returns true when the key was used by the panel. */
+    private fun handleSymPanelKey(ic: InputConnection, keyCode: Int, name: String, event: KeyEvent): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> { closeSymPanel(); return true }
+            KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT,
+            KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT,
+            KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> return false
+        }
+        if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+            val sym = symPages.getOrNull(symPage - 1)?.get(name)
+            if (event.repeatCount == 0 && sym != null) insertFromSymPanel(ic, sym)
+            return true
+        }
+        // anything else (space, enter, arrows): close the panel and handle the key normally
+        closeSymPanel()
+        return false
+    }
+
+    private fun insertFromSymPanel(ic: InputConnection, s: String) {
+        insertSymbol(ic, s)
+        if (prefs.symAutoClose) closeSymPanel()
+    }
+
+    // ------------------------------------------------------------------ Ctrl
+
+    /** Ctrl was tapped before [keyCode]: perform Ctrl+key in the app. */
+    private fun sendCtrlCombo(ic: InputConnection, keyCode: Int) {
+        finishComposing(ic)
+        markEdit()
+        val menuAction = when (keyCode) {
+            KeyEvent.KEYCODE_C -> android.R.id.copy
+            KeyEvent.KEYCODE_X -> android.R.id.cut
+            KeyEvent.KEYCODE_V -> android.R.id.paste
+            KeyEvent.KEYCODE_A -> android.R.id.selectAll
+            else -> null
+        }
+        if (menuAction != null && ic.performContextMenuAction(menuAction)) return
+        var meta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        if (shift.active) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
+        val now = SystemClock.uptimeMillis()
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0, meta))
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0, meta))
+        shift.consumeOneShot()
+    }
+
+    // ------------------------------------------------------------------ notifications
+
+    private fun modeText(name: String, mode: StickyModifier.Mode) = when (mode) {
+        StickyModifier.Mode.ONESHOT -> name
+        StickyModifier.Mode.LOCKED -> "$name зафиксирован"
+        StickyModifier.Mode.OFF -> "$name выкл"
+    }
+
+    /** With the bar hidden, short messages at the bottom of the screen tell what changed. */
+    private fun notifyIfNoBar(text: String) {
+        if (prefs.showBar) return
+        lastToast?.cancel()
+        lastToast = Toast.makeText(this, text, Toast.LENGTH_SHORT).also { it.show() }
+    }
+
     private fun quickLaunch(keyName: String) {
         val launcher = AppLauncher(this)
         val app = launcher.assigned(keyName)
@@ -330,7 +500,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         val s = HashSet<Mod>()
         if (e.isShiftPressed || shift.held) s.add(Mod.SHIFT)
         if (e.isAltPressed || alt.held) s.add(Mod.ALT)
-        if (e.isCtrlPressed) s.add(Mod.CTRL)
+        if (e.isCtrlPressed || ctrl.active) s.add(Mod.CTRL)
         if (e.isFunctionPressed || fnHeld) s.add(Mod.FN)
         if (e.isMetaPressed) s.add(Mod.META)
         return s
@@ -768,6 +938,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         layout?.let {
             prefs.currentLayout = it.id // triggers reloadConfig via the listener; index is preserved
             languages.attachLayout(it)
+            notifyIfNoBar("${it.shortLabel} · ${it.name}")
         }
         updateBarChrome()
         showFor(Mode.NEXT)
@@ -782,6 +953,11 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             shift.active || autoShift -> parts.add("⇧")
         }
         if (symArmed) parts.add("SYM")
+        when (ctrl.mode) {
+            StickyModifier.Mode.LOCKED -> parts.add("CTRL")
+            StickyModifier.Mode.ONESHOT -> parts.add("ctrl")
+            else -> {}
+        }
         when (alt.mode) {
             StickyModifier.Mode.LOCKED -> parts.add("ALT")
             StickyModifier.Mode.ONESHOT -> parts.add("alt")

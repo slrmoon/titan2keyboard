@@ -60,6 +60,18 @@ object LayoutEditing {
         return sb.toString()
     }
 
+    /** Simple "key → text" maps (Alt layer, SYM pages) in the Pastiera format: {"mappings": {...}}. */
+    fun keyMapToJson(map: Map<String, String>, name: String? = null): String {
+        val sb = StringBuilder("{\n")
+        if (name != null) sb.append("  \"name\": ").append(quote(name)).append(",\n")
+        sb.append("  \"mappings\": {")
+        map.entries.forEachIndexed { i, (k, v) ->
+            sb.append(if (i == 0) "\n" else ",\n").append("    ").append(quote(k)).append(": ").append(quote(v))
+        }
+        sb.append("\n  }\n}\n")
+        return sb.toString()
+    }
+
     /** File-name-safe id from a display name ("Моя раскладка" → "moya_raskladka"). */
     fun idFor(name: String, taken: Set<String>): String {
         val base = translit(name.lowercase()).replace(Regex("[^a-z0-9]+"), "_").trim('_').ifEmpty { "layout" }.take(40)

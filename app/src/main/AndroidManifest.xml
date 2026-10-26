@@ -46,6 +46,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".SymEditorActivity"
+            android:exported="false"
+            android:label="SYM-панель" />
+
+        <activity
             android:name=".AppPickerActivity"
             android:exported="false"
             android:excludeFromRecents="true"

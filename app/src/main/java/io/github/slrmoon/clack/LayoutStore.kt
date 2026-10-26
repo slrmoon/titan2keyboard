@@ -87,7 +87,34 @@ class LayoutStore(private val context: Context) {
     fun resetAltLayer() { altFile.delete() }
     fun hasCustomAltLayer() = altFile.exists()
 
+    // --- SYM pages: page 1 symbols, page 2 emoji (same "key → text" format as the Alt layer) ---
+
+    private fun symFile(page: Int) = File(context.filesDir, "sym_page$page.json")
+
+    fun symPage(page: Int): AltLayer {
+        val f = symFile(page)
+        if (f.exists()) runCatching { return AltLayer.parse(f.readText()) }
+        return runCatching { AltLayer.parse(context.assets.open("sym/page$page.json").bufferedReader().use { it.readText() }) }
+            .getOrDefault(AltLayer(emptyMap()))
+    }
+
+    fun symPageJson(page: Int): String = LayoutEditing.keyMapToJson(symPage(page).mappings, SYM_PAGE_NAMES[page - 1])
+
+    fun saveSymPage(page: Int, json: String) {
+        AltLayer.parse(json)
+        symFile(page).writeText(json)
+    }
+
+    fun importSymPage(page: Int, uri: Uri) =
+        saveSymPage(page, context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() })
+
+    fun resetSymPage(page: Int) { symFile(page).delete() }
+    fun hasCustomSymPage(page: Int) = symFile(page).exists()
+
     companion object {
+        const val SYM_PAGES = 2
+        val SYM_PAGE_NAMES = listOf("Символы", "Эмодзи")
+
         /** Shared by the keyboard and the settings screen, so an edit is seen by both. */
         private val cache = ConcurrentHashMap<String, KeyboardLayout>()
     }

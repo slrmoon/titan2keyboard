@@ -59,6 +59,22 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_QUICK_LAUNCH, true)
         set(v) = sp.edit().putBoolean(K_QUICK_LAUNCH, v).apply()
 
+    /** Thin strip with language and suggestions above the keyboard. */
+    var showBar: Boolean
+        get() = sp.getBoolean(K_SHOW_BAR, true)
+        set(v) = sp.edit().putBoolean(K_SHOW_BAR, v).apply()
+
+    enum class SymTap { SYMBOLS, APPS }
+
+    /** What a SYM tap does inside a text field (outside text fields it always starts quick launch). */
+    var symTapInText: SymTap
+        get() = runCatching { SymTap.valueOf(sp.getString(K_SYM_TAP, SymTap.SYMBOLS.name)!!) }.getOrDefault(SymTap.SYMBOLS)
+        set(v) = sp.edit().putString(K_SYM_TAP, v.name).apply()
+
+    var symAutoClose: Boolean
+        get() = sp.getBoolean(K_SYM_AUTOCLOSE, true)
+        set(v) = sp.edit().putBoolean(K_SYM_AUTOCLOSE, v).apply()
+
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
@@ -76,5 +92,8 @@ class Prefs(context: Context) {
         private const val K_LONG_PRESS = "long_press"
         private const val K_MULTITAP = "multitap_ms"
         private const val K_QUICK_LAUNCH = "quick_launch"
+        private const val K_SHOW_BAR = "show_bar"
+        private const val K_SYM_TAP = "sym_tap_in_text"
+        private const val K_SYM_AUTOCLOSE = "sym_autoclose"
     }
 }

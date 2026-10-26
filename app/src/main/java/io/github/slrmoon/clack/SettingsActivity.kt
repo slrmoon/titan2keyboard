@@ -103,13 +103,24 @@ class SettingsActivity : Activity() {
         section("Смена раскладки")
         val current = prefs.switchShortcuts
         val label = if (current == Shortcut.DEFAULTS) "Ctrl+Space" else current.joinToString(", ") { it.label() }
-        note("Сейчас: $label. Также: тап по метке языка на полоске подсказок.")
+        note("Сейчас: $label. Ctrl можно нажать отдельно: Ctrl, отпустить, затем пробел. Так же работают Ctrl, затем C / V / X / A (копировать, вставить, вырезать, выделить всё); двойное нажатие Ctrl фиксирует его. Ещё — тап по метке языка на полоске.")
         row(
             button("Записать сочетание") { recordShortcut() },
             button("Ctrl+Space") { prefs.resetSwitchShortcut(); build() }
         )
 
         // --- typing ---
+        section("Полоска над клавиатурой")
+        switch("Показывать полоску (язык и подсказки)", prefs.showBar) { prefs.showBar = it }
+        note("Если полоска скрыта, смена языка и зафиксированные Shift/Alt/Ctrl показываются коротким сообщением внизу экрана. Подсказки тогда не видны, но автоисправление продолжает работать (его можно выключить ниже).")
+
+        section("SYM: символы и эмодзи")
+        note("В текстовом поле: SYM — панель символов, ещё раз SYM — эмодзи, ещё раз — закрыть. Символ вводится тапом или клавишей, на которой он показан.")
+        spinner("SYM в текстовом поле", listOf("Символы и эмодзи", "Запуск приложений"),
+            Prefs.SymTap.values().indexOf(prefs.symTapInText)) { prefs.symTapInText = Prefs.SymTap.values()[it] }
+        switch("Закрывать панель после ввода символа", prefs.symAutoClose) { prefs.symAutoClose = it }
+        row(button("Редактировать SYM-панель") { startActivity(Intent(this, SymEditorActivity::class.java)) })
+
         section("Ввод")
         switch("Подсказки слов", prefs.suggestions) { prefs.suggestions = it }
         switch("Автоисправление на пробеле", prefs.autoCorrect) { prefs.autoCorrect = it }
@@ -123,8 +134,8 @@ class SettingsActivity : Activity() {
             tapOptions.indexOf(prefs.multiTapMs).coerceAtLeast(1)) { prefs.multiTapMs = tapOptions[it] }
 
         // --- quick launch ---
-        section("Быстрый запуск: SYM, затем буква")
-        note("Нажмите SYM, отпустите и в течение 5 секунд нажмите букву. Если на неё назначено приложение — оно откроется, иначе появится список приложений на эту букву (в любой раскладке: T — и «Telegram», и «Еда»). Долгое нажатие в списке назначает приложение на букву. Работает и на рабочем столе.")
+        section("Быстрый запуск приложений")
+        note("Вне текстовых полей (рабочий стол и т.п.): нажмите SYM, отпустите и в течение 5 секунд нажмите букву. В текстовом поле: удерживайте SYM и нажмите букву. Если на неё назначено приложение — оно откроется, иначе появится список приложений на эту букву (в любой раскладке: T — и «Telegram», и «Еда»). Долгое нажатие в списке назначает приложение на букву. Работает и на рабочем столе.")
         switch("Включено", prefs.quickLaunch) { prefs.quickLaunch = it }
         val launcher = AppLauncher(this)
         val assignments = launcher.assignments()

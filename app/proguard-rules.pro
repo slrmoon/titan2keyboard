@@ -3,3 +3,4 @@
 -keep class io.github.slrmoon.clack.SettingsActivity
 -keep class io.github.slrmoon.clack.AppPickerActivity
 -keep class io.github.slrmoon.clack.LayoutEditorActivity
+-keep class io.github.slrmoon.clack.SymEditorActivity

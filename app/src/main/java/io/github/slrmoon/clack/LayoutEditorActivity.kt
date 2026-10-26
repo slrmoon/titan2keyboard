@@ -4,18 +4,11 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
-import android.text.SpannableStringBuilder
-import android.text.Spanned
-import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -44,7 +37,6 @@ class LayoutEditorActivity : Activity() {
 
     private lateinit var nameField: EditText
     private lateinit var grid: LinearLayout
-    private val dark get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,48 +79,13 @@ class LayoutEditorActivity : Activity() {
 
     private fun renderGrid() {
         grid.removeAllViews()
-        for (row in LayoutEditing.TITAN2_ROWS) {
-            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_HORIZONTAL }
-            for (key in row) {
-                if (key == LayoutEditing.SPACE_GAP) {
-                    line.addView(TextView(this).apply { text = "␣"; gravity = Gravity.CENTER; alpha = 0.4f },
-                        LinearLayout.LayoutParams(0, dp(56), 2f))
-                    continue
-                }
-                line.addView(keyView(key), LinearLayout.LayoutParams(0, dp(56), 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
-            }
-            // rows are not full width on the device; keep keys the same size as the top row
-            val missing = 10 - row.size - row.count { it == LayoutEditing.SPACE_GAP }
-            if (missing > 0) {
-                line.addView(View(this), 0, LinearLayout.LayoutParams(0, 1, missing / 2f))
-                line.addView(View(this), LinearLayout.LayoutParams(0, 1, missing / 2f))
-            }
-            grid.addView(line)
-        }
-    }
-
-    private fun keyView(key: String): View {
-        val m = mappings[key]
-        val text = SpannableStringBuilder()
-        if (m == null) text.append("·") else {
-            text.append(m.primary.lower)
-            if (m.isMultiTap) {
-                val start = text.length
-                text.append("\n").append(m.outputs.drop(1).joinToString(" ") { it.lower })
-                text.setSpan(RelativeSizeSpan(0.6f), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-        }
-        return TextView(this).apply {
-            this.text = text
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            typeface = Typeface.DEFAULT_BOLD
-            background = GradientDrawable().apply {
-                cornerRadius = dp(8).toFloat()
-                setColor(if (dark) Color.rgb(0x2C, 0x2C, 0x2E) else Color.rgb(0xE5, 0xE5, 0xEA))
-            }
-            setOnClickListener { editKey(key) }
-        }
+        grid.addView(KeyGrid.build(this, keyHeightDp = 56, mainSp = 18f,
+            cell = { key ->
+                val m = mappings[key]
+                if (m == null) KeyGrid.Cell("·")
+                else KeyGrid.Cell(m.primary.lower, m.outputs.drop(1).joinToString(" ") { it.lower }.ifEmpty { null })
+            },
+            onClick = ::editKey))
     }
 
     private fun editKey(key: String) {
