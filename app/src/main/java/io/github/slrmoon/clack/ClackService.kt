@@ -362,9 +362,19 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
      */
     private fun handleSym(keyCode: Int, name: String, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_SYM) {
-            if (event.repeatCount == 0) { symHeld = true; symChorded = false }
+            if (event.repeatCount == 0) {
+                symHeld = true
+                symChorded = false
+                if (symIsForSymbols()) {
+                    // In a text field SYM is only about symbols: act on press, not release, so a letter
+                    // typed before SYM is let go already lands on the panel (never launches an app).
+                    symChorded = true
+                    cycleSymPanel()
+                }
+            }
             return true
         }
+        if (symHeld && symIsForSymbols()) return false // the letter goes to the panel
         if (symHeld && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
             if (event.repeatCount == 0) {
                 symChorded = true
@@ -403,14 +413,19 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         updateBarChrome()
     }
 
-    /** SYM pressed and released on its own. */
+    /** In a text field with the "symbols" setting, SYM opens the symbol panel and nothing else. */
+    private fun symIsForSymbols() =
+        !field.raw && currentInputConnection != null && prefs.symTapInText == Prefs.SymTap.SYMBOLS
+
+    private fun cycleSymPanel() {
+        disarmSym()
+        symPage = if (symPage >= LayoutStore.SYM_PAGES) 0 else symPage + 1
+        renderSymPanel()
+    }
+
+    /** SYM pressed and released on its own (outside text fields, or with SYM set to launch apps). */
     private fun onSymTap() {
-        val inText = !field.raw && currentInputConnection != null
-        if (inText && prefs.symTapInText == Prefs.SymTap.SYMBOLS) {
-            disarmSym()
-            symPage = if (symPage >= LayoutStore.SYM_PAGES) 0 else symPage + 1
-            renderSymPanel()
-        } else if (prefs.quickLaunch) {
+        if (prefs.quickLaunch) {
             closeSymPanel()
             if (symArmed) disarmSym() else armSym()
         }

@@ -53,7 +53,7 @@ class SymPanelView(
             }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
         }
         header.addView(TextView(context).apply {
-            text = "SYM — дальше · держать SYM+буква — приложение"
+            text = "SYM — следующая страница"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTextColor(dim)
             maxLines = 1
