@@ -40,6 +40,7 @@ object LayoutEditing {
         sb.append("{\n")
         sb.append("  \"name\": ").append(quote(layout.name)).append(",\n")
         sb.append("  \"description\": ").append(quote(layout.description)).append(",\n")
+        if (!layout.label.isNullOrBlank()) sb.append("  \"shortLabel\": ").append(quote(layout.label)).append(",\n")
         sb.append("  \"mappings\": {")
         layout.mappings.entries.forEachIndexed { i, (key, m) ->
             sb.append(if (i == 0) "\n" else ",\n")

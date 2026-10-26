@@ -33,6 +33,7 @@ class SymEditorActivity : Activity() {
         store = LayoutStore(this)
         prefs = Prefs(this)
         title = "SYM-панель"
+        page = if (prefs.symEmojiFirst) 2 else 1
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(24)) }
         tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -56,7 +57,7 @@ class SymEditorActivity : Activity() {
 
     private fun render() {
         tabs.removeAllViews()
-        for (p in 1..LayoutStore.SYM_PAGES) {
+        for (p in if (prefs.symEmojiFirst) listOf(2, 1) else listOf(1, 2)) {
             tabs.addView(TextView(this).apply {
                 text = LayoutStore.SYM_PAGE_NAMES[p - 1]
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)

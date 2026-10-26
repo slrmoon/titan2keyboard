@@ -87,7 +87,7 @@ class SettingsActivity : Activity() {
 
         // --- layouts ---
         section("Раскладки")
-        note("Формат JSON как у Pastiera: подходят её файлы и редактор pastierakeyedit.vercel.app. Отмеченные раскладки переключаются по кругу в этом порядке.")
+        note("Формат JSON как у Pastiera: подходят её файлы и редактор pastierakeyedit.vercel.app. Отмеченные раскладки переключаются по кругу в этом порядке. ✎ — редактор, долгое нажатие на название — переименовать.")
         val all = store.available()
         val order = prefs.enabledLayouts.toMutableList()
         val sorted = all.sortedBy { e -> order.indexOf(e.id).let { if (it < 0) Int.MAX_VALUE else it } }
@@ -115,9 +115,10 @@ class SettingsActivity : Activity() {
         note("Если полоска скрыта, смена языка и зафиксированные Shift/Alt/Ctrl показываются коротким сообщением внизу экрана. Подсказки тогда не видны, но автоисправление продолжает работать (его можно выключить ниже).")
 
         section("SYM: символы и эмодзи")
-        note("В текстовом поле: SYM — панель символов, ещё раз SYM — эмодзи, ещё раз — закрыть. Символ вводится тапом или клавишей, на которой он показан.")
+        note("В текстовом поле: SYM — первая страница, ещё раз SYM — вторая, ещё раз — закрыть. Символ вводится тапом или клавишей, на которой он показан. Панель открывается и при скрытой полоске.")
         spinner("SYM в текстовом поле", listOf("Символы и эмодзи", "Запуск приложений"),
             Prefs.SymTap.values().indexOf(prefs.symTapInText)) { prefs.symTapInText = Prefs.SymTap.values()[it] }
+        spinner("Сначала показывать", listOf("Символы", "Эмодзи"), if (prefs.symEmojiFirst) 1 else 0) { prefs.symEmojiFirst = it == 1 }
         switch("Закрывать панель после ввода символа", prefs.symAutoClose) { prefs.symAutoClose = it }
         row(button("Редактировать SYM-панель") { startActivity(Intent(this, SymEditorActivity::class.java)) })
 
@@ -190,6 +191,7 @@ class SettingsActivity : Activity() {
                 prefs.enabledLayouts = list
             }
         }
+        check.setOnLongClickListener { rename(e.id); true }
         line.addView(check, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (e.id in order) {
             line.addView(iconButton("↑") { move(e.id, -1) })
@@ -213,6 +215,36 @@ class SettingsActivity : Activity() {
             else -> {}
         }
         return line
+    }
+
+    /** Change a layout's name and short label. For a built-in layout this saves an edited copy. */
+    private fun rename(id: String) {
+        val layout = store.load(id) ?: return
+        val nameField = EditText(this).apply {
+            setText(layout.name)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setSelection(text.length)
+        }
+        val labelField = EditText(this).apply {
+            setText(layout.label ?: "")
+            hint = "Метка на полоске, напр. ${layout.language.uppercase()}"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5))
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(nameField); addView(labelField)
+        }
+        AlertDialog.Builder(this).setTitle("Переименовать раскладку").setView(box)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val name = nameField.text.toString().trim().ifEmpty { layout.name }
+                val label = labelField.text.toString().trim().ifEmpty { null }
+                runCatching { store.save(layout.copy(name = name, label = label)) }
+                    .onSuccess { touch(); build() }
+                    .onFailure { toast("Не удалось: ${it.message}") }
+            }
+            .setNegativeButton("Отмена", null).show()
     }
 
     private fun createLayout(all: List<LayoutStore.Entry>) {

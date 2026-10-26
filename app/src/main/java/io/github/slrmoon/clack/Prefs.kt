@@ -75,6 +75,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_SYM_AUTOCLOSE, true)
         set(v) = sp.edit().putBoolean(K_SYM_AUTOCLOSE, v).apply()
 
+    /** SYM opens emoji first instead of symbols. */
+    var symEmojiFirst: Boolean
+        get() = sp.getBoolean(K_SYM_EMOJI_FIRST, false)
+        set(v) = sp.edit().putBoolean(K_SYM_EMOJI_FIRST, v).apply()
+
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
@@ -93,6 +98,7 @@ class Prefs(context: Context) {
         private const val K_MULTITAP = "multitap_ms"
         private const val K_QUICK_LAUNCH = "quick_launch"
         private const val K_SHOW_BAR = "show_bar"
+        private const val K_SYM_EMOJI_FIRST = "sym_emoji_first"
         private const val K_SYM_TAP = "sym_tap_in_text"
         private const val K_SYM_AUTOCLOSE = "sym_autoclose"
     }

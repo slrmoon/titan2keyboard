@@ -154,6 +154,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         panel.visibility = View.GONE
         v.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
         updateBarChrome()
+        // the window may have been opened just to show the SYM panel
+        if (symPage > 0) main.post { renderSymPanel() }
         return android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             addView(panel)
@@ -406,15 +408,23 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     // ------------------------------------------------------------------ SYM panel
 
+    /** Storage pages (1 symbols, 2 emoji) in the order the user wants to see them. */
+    private fun symOrder(): List<Int> = if (prefs.symEmojiFirst) listOf(2, 1) else listOf(1, 2)
+
     private fun renderSymPanel() {
         val panel = symPanel
+        val order = symOrder()
         if (symPage <= 0) {
             panel?.visibility = View.GONE
         } else if (panel != null) {
-            panel.show(symPage, LayoutStore.SYM_PAGE_NAMES, symPages.getOrElse(symPage - 1) { AltLayer(emptyMap()) })
+            val stored = order[symPage - 1]
+            panel.show(symPage, order.map { LayoutStore.SYM_PAGE_NAMES[it - 1] }, symPages.getOrElse(stored - 1) { AltLayer(emptyMap()) })
             panel.visibility = View.VISIBLE
         }
         updateInputViewShown()
+        // With the bar hidden the system keeps the keyboard window closed, so open/close it ourselves.
+        if (symPage > 0 && !isInputViewShown) requestShowSelf(0)
+        if (symPage == 0 && !prefs.showBar && isInputViewShown) requestHideSelf(0)
     }
 
     private fun closeSymPanel() {
@@ -432,7 +442,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> return false
         }
         if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
-            val sym = symPages.getOrNull(symPage - 1)?.get(name)
+            val sym = symPages.getOrNull(symOrder()[symPage - 1] - 1)?.get(name)
             if (event.repeatCount == 0 && sym != null) insertFromSymPanel(ic, sym)
             return true
         }

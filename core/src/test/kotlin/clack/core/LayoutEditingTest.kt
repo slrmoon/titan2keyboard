@@ -28,6 +28,15 @@ class LayoutEditingTest {
         assertEquals(odd.name, KeyboardLayout.parse("x", LayoutEditing.toJson(odd)).name)
     }
 
+    @Test fun labelRoundTrip() {
+        val ru = TestData.layout("russian_jcuken")
+        assertEquals("RU", ru.shortLabel)
+        val named = ru.copy(name = "Моя", label = "ЙЦ")
+        val again = KeyboardLayout.parse("x", LayoutEditing.toJson(named))
+        assertEquals("ЙЦ", again.shortLabel)
+        assertEquals("Моя", again.name)
+    }
+
     @Test fun keyMapRoundTrip() {
         val m = linkedMapOf("KEYCODE_Q" to "😀", "KEYCODE_W" to "\"", "KEYCODE_E" to "\\")
         assertEquals(m, clack.core.layout.AltLayer.parse(LayoutEditing.keyMapToJson(m, "Эмодзи")).mappings)

@@ -34,7 +34,9 @@ data class KeyboardLayout(
     val id: String,
     val name: String,
     val description: String,
-    val mappings: Map<String, KeyMapping>
+    val mappings: Map<String, KeyMapping>,
+    /** Optional short label for the bar and notifications ("RU", "ЙЦ", "EN"). Extra field, ignored by Pastiera. */
+    val label: String? = null
 ) {
     /** Language guessed from the script of the letters: "ru" for Cyrillic, "en" otherwise. */
     val language: String by lazy {
@@ -44,8 +46,8 @@ data class KeyboardLayout(
         if (cyr > lat) "ru" else "en"
     }
 
-    /** Short label for the status bar, e.g. "RU" / "EN". */
-    val shortLabel: String get() = language.uppercase()
+    /** Short label for the status bar: the layout's own label, or its language ("RU" / "EN"). */
+    val shortLabel: String get() = label?.takeIf { it.isNotBlank() } ?: language.uppercase()
 
     companion object {
         fun parse(id: String, json: String): KeyboardLayout {
@@ -76,7 +78,8 @@ data class KeyboardLayout(
                 id = id,
                 name = root["name"] as? String ?: id,
                 description = root["description"] as? String ?: "",
-                mappings = mappings
+                mappings = mappings,
+                label = (root["shortLabel"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
             )
         }
     }

@@ -34,8 +34,11 @@ class LayoutEditorActivity : Activity() {
     private val mappings = LinkedHashMap<String, KeyMapping>()
     private var dirty = false
     private var originalName = ""
+    private var originalLabel: String? = null
 
     private lateinit var nameField: EditText
+    private lateinit var labelField: EditText
+    private var label: String? = null
     private lateinit var grid: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,11 +51,13 @@ class LayoutEditorActivity : Activity() {
         if (base != null) {
             name = if (existingId != null) base.name else "${base.name} (копия)"
             description = base.description
+            label = base.label
             mappings.putAll(base.mappings)
         } else {
             name = "Моя раскладка"
         }
         originalName = name
+        originalLabel = label
         title = if (existingId != null) "Редактор раскладки" else "Новая раскладка"
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(24)) }
@@ -62,6 +67,14 @@ class LayoutEditorActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         root.addView(nameField)
+        root.addView(label("Метка на полоске и в уведомлении (2–4 символа, пусто — по языку)"))
+        labelField = EditText(this).apply {
+            setText(label ?: "")
+            hint = "RU"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5))
+        }
+        root.addView(labelField)
         root.addView(note("Нажмите на клавишу, чтобы задать её буквы. Несколько букв через пробел — переключаются повторным нажатием (мульти-тап)."))
         grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, dp(8)) }
         root.addView(grid)
@@ -118,7 +131,8 @@ class LayoutEditorActivity : Activity() {
 
     private fun current(id: String): KeyboardLayout {
         name = nameField.text.toString().trim().ifEmpty { "Без названия" }
-        return KeyboardLayout(id, name, description, LinkedHashMap(mappings))
+        label = labelField.text.toString().trim().ifEmpty { null }
+        return KeyboardLayout(id, name, description, LinkedHashMap(mappings), label)
     }
 
     private fun editJson() {
@@ -140,7 +154,8 @@ class LayoutEditorActivity : Activity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 runCatching { KeyboardLayout.parse(existingId ?: "draft", field.text.toString()) }
                     .onSuccess { l ->
-                        name = l.name; description = l.description
+                        name = l.name; description = l.description; label = l.label
+                        labelField.setText(label ?: "")
                         mappings.clear(); mappings.putAll(l.mappings)
                         nameField.setText(name)
                         dirty = true
@@ -181,7 +196,7 @@ class LayoutEditorActivity : Activity() {
 
     @Deprecated("Activity API without AndroidX")
     override fun onBackPressed() {
-        if (nameField.text.toString() != originalName) dirty = true
+        if (nameField.text.toString() != originalName || labelField.text.toString().trim() != (originalLabel ?: "")) dirty = true
         if (!dirty) { super.onBackPressed(); return }
         AlertDialog.Builder(this)
             .setMessage("Сохранить изменения?")
