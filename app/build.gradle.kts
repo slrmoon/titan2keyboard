@@ -41,6 +41,24 @@ android {
         }
     }
 
+    // Two builds from the same code, same package and signature (one installs over the other):
+    //  online  — checks GitHub for updates and installs them (INTERNET, REQUEST_INSTALL_PACKAGES)
+    //  offline — no network or install permissions at all; updates are downloaded manually
+    flavorDimensions += "net"
+    productFlavors {
+        create("online") {
+            dimension = "net"
+            buildConfigField("boolean", "IN_APP_UPDATES", "true")
+        }
+        create("offline") {
+            dimension = "net"
+            buildConfigField("boolean", "IN_APP_UPDATES", "false")
+        }
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

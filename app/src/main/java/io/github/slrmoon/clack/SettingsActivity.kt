@@ -63,7 +63,7 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         build()
-        if (!updateBusy && updater.shouldAutoCheck()) checkForUpdate(quiet = true)
+        if (BuildConfig.IN_APP_UPDATES && !updateBusy && updater.shouldAutoCheck()) checkForUpdate(quiet = true)
     }
 
     private fun build() {
@@ -84,18 +84,28 @@ class SettingsActivity : Activity() {
         }
 
         // --- updates ---
-        section("Версия ${updater.installedVersionName}")
-        val rel = latest
-        when {
-            rel != null && rel.isNewerThan(updater.installedVersionCode) -> {
-                note("Доступна версия ${rel.versionName}" + if (rel.notes.isNotBlank()) ":\n" + rel.notes.take(600) else "")
-                updateButton = button(if (updateBusy) updateStatus ?: "Загрузка…" else "Обновить до ${rel.versionName}") { if (!updateBusy) startUpdate(rel) }
-                row(updateButton!!)
+        if (!BuildConfig.IN_APP_UPDATES) {
+            section("Версия ${updater.installedVersionName} · без интернета")
+            note("У этой версии нет доступа в интернет, поэтому обновления она не проверяет. Новые версии — на странице релизов: скачайте clack-offline.apk и установите поверх.")
+            row(button("Открыть страницу релизов") {
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL))) }
+                    .onFailure { toast("Нет браузера") }
+            })
+        } else {
+            section("Версия ${updater.installedVersionName}")
+            val rel = latest
+            when {
+                rel != null && rel.isNewerThan(updater.installedVersionCode) -> {
+                    note("Доступна версия ${rel.versionName}" + if (rel.notes.isNotBlank()) ":\n" + rel.notes.take(600) else "")
+                    updateButton = button(if (updateBusy) updateStatus ?: "Загрузка…" else "Обновить до ${rel.versionName}") { if (!updateBusy) startUpdate(rel) }
+                    row(updateButton!!)
+                }
+                else -> {
+                    updateStatus?.let { note(it) }
+                    row(button(if (updateBusy) "Проверяю…" else "Проверить обновления") { if (!updateBusy) checkForUpdate(quiet = false) })
+                }
             }
-            else -> {
-                updateStatus?.let { note(it) }
-                row(button(if (updateBusy) "Проверяю…" else "Проверить обновления") { if (!updateBusy) checkForUpdate(quiet = false) })
-            }
+
         }
 
         // --- enable ---
@@ -184,6 +194,17 @@ class SettingsActivity : Activity() {
                 .setPositiveButton("Удалить") { _, _ -> Languages.get(this).clearLearned(); toast("Готово") }
                 .setNegativeButton("Отмена", null).show()
         })
+
+        // --- backup ---
+        section("Резервная копия")
+        note("Один файл со всем: настройки, свои и изменённые раскладки, Alt-слой, SYM-страницы, назначения быстрого запуска и выученные слова. Подходит для переноса на другой телефон или после переустановки.")
+        row(
+            button("Экспорт…") {
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/zip").putExtra(Intent.EXTRA_TITLE, BackupManager(this).suggestedName()), REQ_BACKUP_EXPORT)
+            },
+            button("Импорт…") { pick(REQ_BACKUP_IMPORT) }
+        )
 
         // --- try it ---
         section("Попробовать")
@@ -355,7 +376,42 @@ class SettingsActivity : Activity() {
                 .onSuccess { touch(); toast("Alt-слой загружен"); build() }
                 .onFailure { toast("Не похоже на Alt-слой: ${it.message}") }
             REQ_TELEGRAM -> importTelegram(uri)
+            REQ_BACKUP_EXPORT -> exportBackup(uri)
+            REQ_BACKUP_IMPORT -> importBackup(uri)
         }
+    }
+
+    private fun exportBackup(uri: Uri) {
+        Thread {
+            val r = runCatching { BackupManager(this).export(uri) }
+            runOnUiThread {
+                r.onSuccess { s -> toast("Сохранено: ${s.prefs} настроек, ${s.layouts} раскладок, ${s.wordFiles} словар(я/ей)") }
+                    .onFailure { toast("Не удалось сохранить: ${it.message}") }
+            }
+        }.start()
+    }
+
+    private fun importBackup(uri: Uri) {
+        Thread {
+            val r = runCatching { BackupManager(this).read(uri) }
+            runOnUiThread {
+                r.onFailure { toast("Не удалось прочитать: ${it.message}"); return@runOnUiThread }
+                val content = r.getOrThrow()
+                val s = BackupManager(this).summarize(content)
+                AlertDialog.Builder(this).setTitle("Восстановить из копии?")
+                    .setMessage("Копия от ${content.created} (версия ${content.appVersion}): ${s.prefs} настроек, ${s.layouts} раскладок, ${s.wordFiles} словар(я/ей) выученных слов.\n\nТекущие настройки и выученные слова будут заменены.")
+                    .setPositiveButton("Восстановить") { _, _ ->
+                        Thread {
+                            val res = runCatching { BackupManager(this).restore(content) }
+                            runOnUiThread {
+                                res.onSuccess { toast("Восстановлено"); build() }
+                                    .onFailure { toast("Не удалось восстановить: ${it.message}") }
+                            }
+                        }.start()
+                    }
+                    .setNegativeButton("Отмена", null).show()
+            }
+        }.start()
     }
 
     private fun importTelegram(uri: Uri) {
@@ -493,8 +549,11 @@ class SettingsActivity : Activity() {
 
 
     companion object {
+        private const val RELEASES_URL = "https://github.com/${Updater.REPO}/releases/latest"
         private const val REQ_LAYOUT = 1
         private const val REQ_ALT = 2
         private const val REQ_TELEGRAM = 3
+        private const val REQ_BACKUP_EXPORT = 4
+        private const val REQ_BACKUP_IMPORT = 5
     }
 }

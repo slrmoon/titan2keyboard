@@ -88,6 +88,19 @@ class Languages private constructor(private val context: Context) {
         }
     }
 
+    /** Re-read learned data from disk (after restoring a backup). Blocking until done. */
+    fun reloadLearned() {
+        worker.submit {
+            for (l in langs.values) {
+                l.user.clear()
+                val f = file(l.code)
+                if (f.exists()) runCatching { f.bufferedReader().use(l.user::read) }
+                l.engine.refreshUserIndex()
+                l.savedVersion = l.user.version
+            }
+        }.get()
+    }
+
     fun clearLearned() = worker.execute {
         for (l in langs.values) { l.user.clear(); l.engine.refreshUserIndex() }
         context.filesDir.listFiles { f -> f.name.startsWith("user_") }?.forEach { it.delete() }

@@ -117,5 +117,7 @@ class LayoutStore(private val context: Context) {
 
         /** Shared by the keyboard and the settings screen, so an edit is seen by both. */
         private val cache = ConcurrentHashMap<String, KeyboardLayout>()
+
+        fun clearCache() = cache.clear()
     }
 }

@@ -36,25 +36,34 @@ jobs:
       - name: Test core
         run: ./gradlew :core:test --no-daemon
 
-      - name: Build APK
+      - name: Build APKs
         env:
           CLACK_KEYSTORE_PASSWORD: ${{ secrets.CLACK_KEYSTORE_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: ./gradlew :app:assembleOnlineRelease :app:assembleOfflineRelease --no-daemon
 
-      - name: Check APK contents
-        run: |
-          apk=app/build/outputs/apk/release/app-release.apk
-          unzip -l "$apk" > contents.txt
-          for f in assets/dict/ru.tsv assets/dict/en.tsv assets/layouts/russian_jcuken.json assets/layouts/qwerty.json assets/layouts/russian_translit.json assets/alt/titan2.json; do
-            grep -qE " ${f}(\.gz)?$" contents.txt || { echo "::error::$f missing from APK"; exit 1; }
-          done
-          echo "APK size: $(stat -c%s "$apk") bytes"
-
-      - name: Name the APK
+      - name: Name the APKs
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/app-release.apk out/clack.apk
+          cp app/build/outputs/apk/online/release/app-online-release.apk out/clack.apk
+          cp app/build/outputs/apk/offline/release/app-offline-release.apk out/clack-offline.apk
           ls -la out
+
+      - name: Check APK contents and permissions
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
+          for apk in out/clack.apk out/clack-offline.apk; do
+            unzip -l "$apk" > contents.txt
+            for f in assets/dict/ru.tsv assets/dict/en.tsv assets/layouts/russian_jcuken.json assets/layouts/qwerty.json assets/layouts/russian_translit.json assets/alt/titan2.json; do
+              grep -qE " ${f}(\.gz)?$" contents.txt || { echo "::error::$f missing from $apk"; exit 1; }
+            done
+            echo "$apk: $(stat -c%s "$apk") bytes"
+            "$aapt2" dump permissions "$apk" | tee "$apk.perms"
+          done
+          grep -q "android.permission.INTERNET" out/clack.apk.perms || { echo "::error::online build lost INTERNET"; exit 1; }
+          if grep -qE "INTERNET|REQUEST_INSTALL_PACKAGES" out/clack-offline.apk.perms; then
+            echo "::error::offline build must not have network or install permissions"; exit 1
+          fi
+          rm -f out/*.perms
 
       - name: Release notes
         run: |
@@ -84,7 +93,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: clack-apk
-          path: out/clack.apk
+          path: |
+            out/clack.apk
+            out/clack-offline.apk
 
       - name: Publish as the "latest" release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -97,4 +108,5 @@ jobs:
           make_latest: true
           files: |
             out/clack.apk
+            out/clack-offline.apk
             out/version.json
