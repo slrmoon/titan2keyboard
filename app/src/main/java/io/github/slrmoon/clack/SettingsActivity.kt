@@ -166,6 +166,8 @@ class SettingsActivity : Activity() {
             note("Вне текстовых полей Android передаёт клавиатуре нажатия, только если приложение её подключает, поэтому навигация там работает не везде. Медиа-клавиши уходят в активный плеер; перемотку (удержание ⏮/⏭) поддерживают не все плееры.")
             row(button("Схема клавиш SymPad…") { startActivity(Intent(this, SymPadEditorActivity::class.java)) })
         }
+        spinner("Подсказки при удержании SYM и шорткатах", listOf("Всегда", "Только без полоски", "Никогда"),
+            Prefs.Hints.values().indexOf(prefs.shortcutHints)) { prefs.shortcutHints = Prefs.Hints.values()[it] }
 
         section("Ввод")
         switch("Подсказки слов", prefs.suggestions) { prefs.suggestions = it }

@@ -120,6 +120,13 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_SYMPAD_OUTSIDE, false)
         set(v) = sp.edit().putBoolean(K_SYMPAD_OUTSIDE, v).apply()
 
+    enum class Hints { ALWAYS, NO_BAR, NEVER }
+
+    /** Short messages when holding SYM, on SymPad actions and app shortcuts. */
+    var shortcutHints: Hints
+        get() = runCatching { Hints.valueOf(sp.getString(K_HINTS, Hints.ALWAYS.name)!!) }.getOrDefault(Hints.ALWAYS)
+        set(v) = sp.edit().putString(K_HINTS, v.name).apply()
+
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
@@ -139,6 +146,7 @@ class Prefs(context: Context) {
         private const val K_QUICK_LAUNCH = "quick_launch"
         private const val K_SHOW_BAR = "show_bar"
         private const val K_SYMPAD = "sympad"
+        private const val K_HINTS = "shortcut_hints"
         private const val K_SYMPAD_LOCK = "sympad_lock"
         private const val K_SYMPAD_LONG_MS = "sympad_long_ms"
         private const val K_SYMPAD_OUTSIDE = "sympad_outside_text"

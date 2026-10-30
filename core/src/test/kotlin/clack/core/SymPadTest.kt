@@ -37,6 +37,15 @@ class SymPadTest {
         assertTrue(SymPadAction.MEDIA_NEXT.isMedia)
         assertEquals(K.MEDIA_FAST_FORWARD, SymPadAction.MEDIA_NEXT.seekKey)
         assertEquals(null, SymPadAction.MEDIA_PLAY_PAUSE.seekKey)
+        assertEquals(142, SymPadAction.F12.key)
+        assertEquals(120, SymPadAction.PRINT_SCREEN.key)
+        assertTrue(SymPadAction.REDO.ctrl && SymPadAction.REDO.shift)
+        assertTrue(SymPadAction.COPY.isClipboard)
+        assertTrue(SymPadAction.SWITCH_LAYOUT.isInternal)
+        assertFalse(SymPadAction.VOLUME_UP.isMedia)
+        assertTrue(SymPadAction.MEDIA_REWIND.isMedia)
+        // every non-internal, non-volume action sends a key
+        for (a in SymPadAction.values()) if (a != SymPadAction.NONE && !a.isInternal && !a.isVolume) assertTrue(a.id, a.key > 0)
         // ids are unique (they are stored in files)
         assertEquals(SymPadAction.values().size, SymPadAction.values().map { it.id }.toSet().size)
     }

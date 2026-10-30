@@ -72,6 +72,15 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private var symUnlocking = false
     private var symPadMap: SymPadMap = SymPadMap.DEFAULT
     private val symLongPress = Runnable { onSymLongPress() }
+    private val symHoldHint = Runnable {
+        if (symTracker.held && symPadChordHere() && !symPadLocked) {
+            symHoldHintShown = true
+            hint(if (prefs.symPadLock) "SymPad: SYM + клавиша · держите — фиксация" else "SymPad: SYM + клавиша")
+        }
+    }
+    private var symHoldHintShown = false
+    private var lastHintText: String? = null
+    private var lastHintAt = 0L
     private class MediaPress(val keyCode: Int, val action: SymPadAction, val downAt: Long) {
         var seeking = false
         var lastSeekAt = 0L
@@ -415,7 +424,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         if (symTracker.held) {
             if (letter) {
                 symTracker.onOtherKey()
-                if (symPadChordHere()) { onSymPadKey(keyCode, name, event); return true }
+                if (symPadChordHere()) { main.removeCallbacks(symHoldHint); onSymPadKey(keyCode, name, event); return true }
                 if (symIsForSymbols()) return false // classic: the panel is open, the letter goes there
                 if (event.repeatCount == 0 && prefs.quickLaunch) {
                     currentInputConnection?.let { if (!field.raw) finishComposing(it) }
@@ -449,8 +458,11 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         symTracker.longPressMs = prefs.symPadLongMs.toLong()
         symTracker.onDown(event.eventTime)
         symOpenedOnPress = false
+        symHoldHintShown = false
         main.removeCallbacks(symLongPress)
+        main.removeCallbacks(symHoldHint)
         if (symPadLocked) { symUnlocking = true; return }
+        if (prefs.symPad) { main.postDelayed(symHoldHint, SYM_HOLD_HINT_MS); updateBarChrome() }
         if (prefs.symPad) {
             if (prefs.symPadLock) main.postDelayed(symLongPress, prefs.symPadLongMs.toLong())
         } else if (symIsForSymbols()) {
@@ -467,7 +479,12 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     private fun onSymUp(event: KeyEvent) {
         main.removeCallbacks(symLongPress)
+        main.removeCallbacks(symHoldHint)
         val release = symTracker.onUp(event.eventTime)
+        // the "hold SYM" hint is only useful while SYM is down
+        if (symHoldHintShown && !symPadLocked) lastToast?.cancel()
+        symHoldHintShown = false
+        updateBarChrome()
         if (symUnlocking) {
             symUnlocking = false
             if (release != SymKeyTracker.Release.CHORD) unlockSymPad()
@@ -492,14 +509,16 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         disarmSym()
         closeSymPanel()
         currentInputConnection?.let { if (!field.raw) finishComposing(it) }
-        notifyIfNoBar("<S> SymPad зафиксирован")
+        main.removeCallbacks(symHoldHint)
+        symHoldHintShown = false
+        hint("<S> SymPad зафиксирован · SYM — выход", force = true)
         updateBarChrome()
     }
 
     private fun unlockSymPad() {
         if (!symPadLocked) return
         symPadLocked = false
-        notifyIfNoBar("SymPad выкл")
+        hint("SymPad выкл", force = true)
         updateBarChrome()
     }
 
@@ -511,6 +530,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         if (action == SymPadAction.NONE) return // unassigned keys never type
         consumedKeys.add(keyCode)
         val repeat = event.repeatCount
+        if (repeat == 0 && action.seekKey == null) hint("${action.short}  ${action.label}")
+        val ic = currentInputConnection
         when {
             action.isVolume -> {
                 if (repeat > 0 && event.eventTime - lastSymPadRepeatAt < VOLUME_REPEAT_MS) return
@@ -519,13 +540,57 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             }
             action.seekKey != null -> onSeekableMediaKey(keyCode, action, event)
             action.isMedia -> if (repeat == 0) dispatchMedia(action.key)
+            action.isInternal -> if (repeat == 0) runInternal(action, ic)
+            ic == null -> {}
+            action.isClipboard -> if (repeat == 0) {
+                if (!field.raw) finishComposing(ic)
+                val menuId = when (action) {
+                    SymPadAction.COPY -> android.R.id.copy
+                    SymPadAction.CUT -> android.R.id.cut
+                    SymPadAction.PASTE -> android.R.id.paste
+                    else -> android.R.id.selectAll
+                }
+                if (!ic.performContextMenuAction(menuId)) sendSymPadKey(ic, action, 0, false)
+            }
             else -> {
-                val ic = currentInputConnection ?: return
                 val selecting = action.isMovement && (shift.active || event.isShiftPressed)
                 sendSymPadKey(ic, action, repeat, selecting)
                 if (repeat == 0) { shift.consumeOneShot(); updateBarChrome() }
             }
         }
+    }
+
+    /** Actions Clack does itself. */
+    private fun runInternal(action: SymPadAction, ic: InputConnection?) {
+        when (action) {
+            SymPadAction.DELETE_WORD -> ic?.let { deleteWordBeforeCursor(it) }
+            SymPadAction.SWITCH_LAYOUT -> switchLayout()
+            SymPadAction.OPEN_SYMBOLS, SymPadAction.OPEN_EMOJI -> if (inTextField()) {
+                if (symPadLocked) { symPadLocked = false; updateBarChrome() }
+                val wantEmoji = action == SymPadAction.OPEN_EMOJI
+                // pages are shown in the user's order; find the one with the wanted content
+                val stored = if (wantEmoji) 2 else 1
+                symPage = symOrder().indexOf(stored) + 1
+                renderSymPanel()
+            }
+            SymPadAction.OPEN_SETTINGS -> openSettings()
+            else -> {}
+        }
+    }
+
+    /** Short message for SymPad and shortcuts; repeated identical messages are not stacked. */
+    private fun hint(text: String, force: Boolean = false) {
+        when (prefs.shortcutHints) {
+            Prefs.Hints.NEVER -> if (!force || prefs.showBar) return
+            Prefs.Hints.NO_BAR -> if (prefs.showBar) return
+            Prefs.Hints.ALWAYS -> {}
+        }
+        val now = SystemClock.uptimeMillis()
+        if (!force && text == lastHintText && now - lastHintAt < HINT_REPEAT_MS) return
+        lastHintText = text
+        lastHintAt = now
+        lastToast?.cancel()
+        lastToast = Toast.makeText(this, text, Toast.LENGTH_SHORT).also { it.show() }
     }
 
     /**
@@ -536,6 +601,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         if (!field.raw) finishComposing(ic)
         var meta = 0
         if (action.ctrl) meta = meta or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        if (action.shift && !selecting) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
         if (selecting) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
         val now = SystemClock.uptimeMillis()
         if (selecting) ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SHIFT_LEFT, 0,
@@ -718,7 +784,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private fun quickLaunch(keyName: String) {
         val launcher = AppLauncher(this)
         val app = launcher.assigned(keyName)
-        if (app != null && launcher.launch(app)) return
+        if (app != null && launcher.launch(app)) { hint("SYM+${AppLauncher.keyLabel(keyName)} → ${app.label}"); return }
         val letters = AppFilter.lettersForKey(keyName, layouts.ifEmpty { listOfNotNull(layout) })
         runCatching { startActivity(AppPickerActivity.intent(this, keyName, letters)) }
             .onFailure { Toast.makeText(this, "Не удалось открыть список приложений", Toast.LENGTH_SHORT).show() }
@@ -1254,6 +1320,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             shift.active || autoShift -> parts.add("⇧")
         }
         if (symPadLocked) parts.add("<S>")
+        else if (symTracker.held && prefs.symPad) parts.add("SYM…")
         if (symArmed) parts.add("SYM")
         when (ctrl.mode) {
             StickyModifier.Mode.LOCKED -> parts.add("CTRL")
@@ -1280,6 +1347,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         private const val HOLD_WORD_INTERVAL_MS = 300L
         private const val SYM_TIMEOUT_MS = 5000L
         private const val MEDIA_SEEK_MS = 500L
+        private const val SYM_HOLD_HINT_MS = 250L
+        private const val HINT_REPEAT_MS = 1500L
         private const val MEDIA_SEEK_REPEAT_MS = 250L
         private const val VOLUME_REPEAT_MS = 150L
         private const val SYM_HINT_DELAY_MS = 500L
