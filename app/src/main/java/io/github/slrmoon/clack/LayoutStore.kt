@@ -5,6 +5,7 @@ import android.net.Uri
 import clack.core.layout.AltLayer
 import clack.core.layout.KeyboardLayout
 import clack.core.layout.LayoutEditing
+import clack.core.sympad.SymPadMap
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -110,6 +111,23 @@ class LayoutStore(private val context: Context) {
 
     fun resetSymPage(page: Int) { symFile(page).delete() }
     fun hasCustomSymPage(page: Int) = symFile(page).exists()
+
+    // --- SymPad scheme ---
+
+    private val symPadFile = File(context.filesDir, "sympad.json")
+
+    fun symPadMap(): SymPadMap {
+        if (symPadFile.exists()) runCatching { return SymPadMap.parse(symPadFile.readText()) }
+        return SymPadMap.DEFAULT
+    }
+
+    fun saveSymPadMap(map: SymPadMap) = symPadFile.writeText(map.toJson())
+
+    /** Validates and saves JSON (from the editor or an imported file). */
+    fun saveSymPadJson(json: String): SymPadMap = SymPadMap.parse(json).also { symPadFile.writeText(json) }
+
+    fun resetSymPadMap() { symPadFile.delete() }
+    fun hasCustomSymPadMap() = symPadFile.exists()
 
     companion object {
         const val SYM_PAGES = 2

@@ -51,6 +51,11 @@
             android:label="SYM-панель" />
 
         <activity
+            android:name=".SymPadEditorActivity"
+            android:exported="false"
+            android:label="Схема SymPad" />
+
+        <activity
             android:name=".AppPickerActivity"
             android:exported="false"
             android:excludeFromRecents="true"

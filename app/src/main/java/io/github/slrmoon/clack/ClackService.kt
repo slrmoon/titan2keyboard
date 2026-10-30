@@ -21,6 +21,9 @@ import clack.core.launch.AppFilter
 import clack.core.input.MultiTapTracker
 import clack.core.input.StickyModifier
 import clack.core.input.TextEdits
+import clack.core.sympad.SymKeyTracker
+import clack.core.sympad.SymPadAction
+import clack.core.sympad.SymPadMap
 import clack.core.layout.AltLayer
 import clack.core.layout.KeyboardLayout
 import clack.core.predict.Tokenizer
@@ -60,8 +63,21 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     /** 0 = SYM panel closed, otherwise the page shown (1 symbols, 2 emoji). */
     private var symPage = 0
     private var symPages: List<AltLayer> = emptyList()
-    private var symHeld = false
-    private var symChorded = false
+    private val symTracker = SymKeyTracker()
+    /** SYM opened the panel on press (classic mode), so its release does nothing more. */
+    private var symOpenedOnPress = false
+    /** SymPad stays on without holding SYM (long press SYM); letters are actions, unassigned ones do nothing. */
+    private var symPadLocked = false
+    /** SYM went down while SymPad was locked: its release unlocks. */
+    private var symUnlocking = false
+    private var symPadMap: SymPadMap = SymPadMap.DEFAULT
+    private val symLongPress = Runnable { onSymLongPress() }
+    private class MediaPress(val keyCode: Int, val action: SymPadAction, val downAt: Long) {
+        var seeking = false
+        var lastSeekAt = 0L
+    }
+    private var mediaPress: MediaPress? = null
+    private var lastSymPadRepeatAt = 0L
     private var lastToast: Toast? = null
 
     // --- state of the editor field ---
@@ -138,6 +154,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         // warm up the other languages too, so switching is instant
         layouts.map { it.language }.distinct().forEach { languages.ensure(it) }
         symPages = (1..LayoutStore.SYM_PAGES).map { store.symPage(it) }
+        symPadMap = store.symPadMap()
+        if (!prefs.symPad && symPadLocked) { symPadLocked = false }
         bar?.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
         if (symPage > 0) renderSymPanel()
         updateInputViewShown()
@@ -198,7 +216,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         multiTap.reset()
         shift.reset(); alt.reset(); ctrl.reset()
         symPage = 0
-        symHeld = false
+        symTracker.reset()
+        symUnlocking = false
+        main.removeCallbacks(symLongPress)
         symPanel?.visibility = View.GONE
         field = classify(attribute)
         updateInputViewShown()
@@ -317,9 +337,15 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_SYM && consumedKeys.remove(keyCode)) {
-            symHeld = false
-            if (!symChorded) onSymTap()
+            onSymUp(event)
             return true
+        }
+        mediaPress?.let { mp ->
+            if (mp.keyCode == keyCode) {
+                finishMediaPress(mp, event)
+                consumedKeys.remove(keyCode)
+                return true
+            }
         }
         if (consumedKeys.remove(keyCode)) return true
         if (field.raw) return super.onKeyUp(keyCode, event)
@@ -371,46 +397,201 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     }
 
     /**
-     * SYM handling. The SYM key itself acts on release (see onKeyUp) so that holding SYM and
-     * pressing a letter can launch an app without opening the panel. Returns true when used.
+     * SYM handling, before anything else (works in text fields and outside them).
+     *
+     * Classic mode (SymPad off): in a text field SYM opens the symbol panel on press and letters held
+     * with it go to the panel; elsewhere holding SYM + letter, or SYM then a letter, launches an app.
+     *
+     * SymPad on: holding SYM turns letters into navigation/media keys; SYM alone opens the panel on
+     * release; a long press locks SymPad until the next SYM press. Outside text fields holding SYM +
+     * letter still launches apps unless SymPad is chosen there in settings.
      */
     private fun handleSym(keyCode: Int, name: String, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_SYM) {
-            if (event.repeatCount == 0) {
-                symHeld = true
-                symChorded = false
-                if (symIsForSymbols()) {
-                    // In a text field SYM is only about symbols: act on press, not release, so a letter
-                    // typed before SYM is let go already lands on the panel (never launches an app).
-                    symChorded = true
-                    cycleSymPanel()
-                }
-            }
+            if (event.repeatCount == 0) onSymDown(event)
             return true
         }
-        if (symHeld && symIsForSymbols()) return false // the letter goes to the panel
-        if (symHeld && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
-            if (event.repeatCount == 0) {
-                symChorded = true
-                if (prefs.quickLaunch) {
+        val letter = keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z
+        if (symTracker.held) {
+            if (letter) {
+                symTracker.onOtherKey()
+                if (symPadChordHere()) { onSymPadKey(keyCode, name, event); return true }
+                if (symIsForSymbols()) return false // classic: the panel is open, the letter goes there
+                if (event.repeatCount == 0 && prefs.quickLaunch) {
                     currentInputConnection?.let { if (!field.raw) finishComposing(it) }
                     closeSymPanel()
                     quickLaunch(name)
                 }
+                return true
             }
-            return true
+            if (!isModifierKey(keyCode) && keyCode !in SHIFT_ALT_FN) symTracker.onOtherKey()
         }
+        if (symPadLocked && letter) { onSymPadKey(keyCode, name, event); return true }
         if (!symArmed) return false
         if (isModifierKey(keyCode) || keyCode in SHIFT_ALT_FN) return false // keep waiting for the letter
         if (event.repeatCount > 0) return true
         disarmSym()
-        if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+        if (letter) {
             currentInputConnection?.let { if (!field.raw) finishComposing(it) }
             quickLaunch(name)
             return true
         }
         // Esc or Space just cancel; any other key cancels and then works as usual
         return keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_SPACE
+    }
+
+    private fun inTextField() = !field.raw && currentInputConnection != null
+
+    /** Holding SYM gives SymPad here: in text fields always (when on), elsewhere only if chosen. */
+    private fun symPadChordHere() = prefs.symPad && (inTextField() || prefs.symPadOutsideText)
+
+    private fun onSymDown(event: KeyEvent) {
+        symTracker.longPressMs = prefs.symPadLongMs.toLong()
+        symTracker.onDown(event.eventTime)
+        symOpenedOnPress = false
+        main.removeCallbacks(symLongPress)
+        if (symPadLocked) { symUnlocking = true; return }
+        if (prefs.symPad) {
+            if (prefs.symPadLock) main.postDelayed(symLongPress, prefs.symPadLongMs.toLong())
+        } else if (symIsForSymbols()) {
+            // Classic: act on press, so a letter typed before SYM is let go already lands on the panel.
+            symOpenedOnPress = true
+            cycleSymPanel()
+        }
+    }
+
+    private fun onSymLongPress() {
+        if (!prefs.symPad || !prefs.symPadLock || symPadLocked) return
+        if (symTracker.checkLong(SystemClock.uptimeMillis())) lockSymPad()
+    }
+
+    private fun onSymUp(event: KeyEvent) {
+        main.removeCallbacks(symLongPress)
+        val release = symTracker.onUp(event.eventTime)
+        if (symUnlocking) {
+            symUnlocking = false
+            if (release != SymKeyTracker.Release.CHORD) unlockSymPad()
+            return
+        }
+        when (release) {
+            SymKeyTracker.Release.CHORD -> {}
+            SymKeyTracker.Release.LONG ->
+                if (prefs.symPad && prefs.symPadLock) { if (!symPadLocked) lockSymPad() }
+                else if (!symOpenedOnPress) onSymTapAction()
+            SymKeyTracker.Release.TAP -> if (!symOpenedOnPress) onSymTapAction()
+        }
+    }
+
+    /** What a plain SYM tap does when it acts on release. */
+    private fun onSymTapAction() {
+        if (symIsForSymbols()) cycleSymPanel() else onSymTap()
+    }
+
+    private fun lockSymPad() {
+        symPadLocked = true
+        disarmSym()
+        closeSymPanel()
+        currentInputConnection?.let { if (!field.raw) finishComposing(it) }
+        notifyIfNoBar("<S> SymPad зафиксирован")
+        updateBarChrome()
+    }
+
+    private fun unlockSymPad() {
+        if (!symPadLocked) return
+        symPadLocked = false
+        notifyIfNoBar("SymPad выкл")
+        updateBarChrome()
+    }
+
+    // ------------------------------------------------------------------ SymPad actions
+
+    private fun onSymPadKey(keyCode: Int, name: String, event: KeyEvent) {
+        shift.onOtherKeyWhileHeld(); alt.onOtherKeyWhileHeld(); ctrl.onOtherKeyWhileHeld()
+        val action = symPadMap[name]
+        if (action == SymPadAction.NONE) return // unassigned keys never type
+        consumedKeys.add(keyCode)
+        val repeat = event.repeatCount
+        when {
+            action.isVolume -> {
+                if (repeat > 0 && event.eventTime - lastSymPadRepeatAt < VOLUME_REPEAT_MS) return
+                lastSymPadRepeatAt = event.eventTime
+                adjustVolume(action)
+            }
+            action.seekKey != null -> onSeekableMediaKey(keyCode, action, event)
+            action.isMedia -> if (repeat == 0) dispatchMedia(action.key)
+            else -> {
+                val ic = currentInputConnection ?: return
+                val selecting = action.isMovement && (shift.active || event.isShiftPressed)
+                sendSymPadKey(ic, action, repeat, selecting)
+                if (repeat == 0) { shift.consumeOneShot(); updateBarChrome() }
+            }
+        }
+    }
+
+    /**
+     * Sends the emulated key to the app. With Shift, a real Shift press wraps the key: text views
+     * only extend the selection when they have seen Shift go down, not just a meta flag.
+     */
+    private fun sendSymPadKey(ic: InputConnection, action: SymPadAction, repeat: Int, selecting: Boolean) {
+        if (!field.raw) finishComposing(ic)
+        var meta = 0
+        if (action.ctrl) meta = meta or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        if (selecting) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
+        val now = SystemClock.uptimeMillis()
+        if (selecting) ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SHIFT_LEFT, 0,
+            KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON))
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, action.key, repeat, meta))
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, action.key, 0, meta))
+        if (selecting) ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SHIFT_LEFT, 0, 0))
+    }
+
+    /** Previous/next track: a tap switches tracks on release, holding seeks while held. */
+    private fun onSeekableMediaKey(keyCode: Int, action: SymPadAction, event: KeyEvent) {
+        val seek = action.seekKey ?: return
+        if (event.repeatCount == 0) {
+            mediaPress = MediaPress(keyCode, action, event.eventTime)
+            return
+        }
+        val mp = mediaPress?.takeIf { it.keyCode == keyCode } ?: return
+        if (!mp.seeking && event.eventTime - mp.downAt >= MEDIA_SEEK_MS) {
+            mp.seeking = true
+            mp.lastSeekAt = event.eventTime
+            dispatchMediaEvent(KeyEvent.ACTION_DOWN, seek, 0, mp.downAt)
+        } else if (mp.seeking && event.eventTime - mp.lastSeekAt >= MEDIA_SEEK_REPEAT_MS) {
+            mp.lastSeekAt = event.eventTime
+            dispatchMediaEvent(KeyEvent.ACTION_DOWN, seek, event.repeatCount, mp.downAt)
+        }
+    }
+
+    private fun finishMediaPress(mp: MediaPress, event: KeyEvent) {
+        mediaPress = null
+        val seek = mp.action.seekKey
+        if (mp.seeking && seek != null) dispatchMediaEvent(KeyEvent.ACTION_UP, seek, 0, mp.downAt)
+        else dispatchMedia(mp.action.key)
+    }
+
+    private fun dispatchMedia(code: Int) {
+        val t = SystemClock.uptimeMillis()
+        dispatchMediaEvent(KeyEvent.ACTION_DOWN, code, 0, t)
+        dispatchMediaEvent(KeyEvent.ACTION_UP, code, 0, t)
+    }
+
+    /** Media keys go to the system media session (the active player), not to the focused app. */
+    private fun dispatchMediaEvent(action: Int, code: Int, repeat: Int, downTime: Long) {
+        runCatching {
+            getSystemService(android.media.AudioManager::class.java)
+                .dispatchMediaKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), action, code, repeat))
+        }
+    }
+
+    private fun adjustVolume(action: SymPadAction) {
+        val am = getSystemService(android.media.AudioManager::class.java) ?: return
+        val dir = when (action) {
+            SymPadAction.VOLUME_UP -> android.media.AudioManager.ADJUST_RAISE
+            SymPadAction.VOLUME_DOWN -> android.media.AudioManager.ADJUST_LOWER
+            else -> android.media.AudioManager.ADJUST_TOGGLE_MUTE
+        }
+        runCatching { am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, dir, android.media.AudioManager.FLAG_SHOW_UI) }
     }
 
     private fun armSym() {
@@ -1072,6 +1253,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             shift.mode == StickyModifier.Mode.LOCKED -> parts.add("⇪")
             shift.active || autoShift -> parts.add("⇧")
         }
+        if (symPadLocked) parts.add("<S>")
         if (symArmed) parts.add("SYM")
         when (ctrl.mode) {
             StickyModifier.Mode.LOCKED -> parts.add("CTRL")
@@ -1097,6 +1279,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         private const val DOUBLE_SPACE_MS = 600L
         private const val HOLD_WORD_INTERVAL_MS = 300L
         private const val SYM_TIMEOUT_MS = 5000L
+        private const val MEDIA_SEEK_MS = 500L
+        private const val MEDIA_SEEK_REPEAT_MS = 250L
+        private const val VOLUME_REPEAT_MS = 150L
         private const val SYM_HINT_DELAY_MS = 500L
         private val SHIFT_ALT_FN = setOf(
             KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT,

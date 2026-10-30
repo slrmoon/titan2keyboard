@@ -88,7 +88,7 @@ class BackupManager(context: Context) {
 
     private fun isDataPath(path: String) =
         (path.startsWith("layouts/") && path.endsWith(".json") && path.count { it == '/' } == 1) ||
-            path == "alt_layer.json" ||
+            path == "alt_layer.json" || path == "sympad.json" ||
             Regex("sym_page\\d+\\.json").matches(path) ||
             Regex("user_[a-z]{2,3}\\.tsv").matches(path)
 

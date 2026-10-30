@@ -101,6 +101,25 @@ class Prefs(context: Context) {
         get() = sp.getInt(K_DOUBLE_BACKSPACE_MS, 350)
         set(v) = sp.edit().putInt(K_DOUBLE_BACKSPACE_MS, v).apply()
 
+    /** SymPad: SYM held + letter = navigation / media key. Off: SYM works as before. */
+    var symPad: Boolean
+        get() = sp.getBoolean(K_SYMPAD, false)
+        set(v) = sp.edit().putBoolean(K_SYMPAD, v).apply()
+
+    /** Long press SYM locks SymPad until the next SYM press. */
+    var symPadLock: Boolean
+        get() = sp.getBoolean(K_SYMPAD_LOCK, true)
+        set(v) = sp.edit().putBoolean(K_SYMPAD_LOCK, v).apply()
+
+    var symPadLongMs: Int
+        get() = sp.getInt(K_SYMPAD_LONG_MS, 500)
+        set(v) = sp.edit().putInt(K_SYMPAD_LONG_MS, v).apply()
+
+    /** Outside text fields holding SYM + letter does SymPad instead of launching apps. */
+    var symPadOutsideText: Boolean
+        get() = sp.getBoolean(K_SYMPAD_OUTSIDE, false)
+        set(v) = sp.edit().putBoolean(K_SYMPAD_OUTSIDE, v).apply()
+
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
         set(v) = sp.edit().putInt(K_MULTITAP, v).apply()
@@ -119,6 +138,10 @@ class Prefs(context: Context) {
         private const val K_MULTITAP = "multitap_ms"
         private const val K_QUICK_LAUNCH = "quick_launch"
         private const val K_SHOW_BAR = "show_bar"
+        private const val K_SYMPAD = "sympad"
+        private const val K_SYMPAD_LOCK = "sympad_lock"
+        private const val K_SYMPAD_LONG_MS = "sympad_long_ms"
+        private const val K_SYMPAD_OUTSIDE = "sympad_outside_text"
         private const val K_DOUBLE_BACKSPACE = "double_backspace_word"
         private const val K_WORD_DELETE = "word_delete"
         private const val K_DOUBLE_BACKSPACE_MS = "double_backspace_ms"

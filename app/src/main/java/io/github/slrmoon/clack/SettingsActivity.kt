@@ -154,6 +154,19 @@ class SettingsActivity : Activity() {
         switch("Закрывать панель после ввода символа", prefs.symAutoClose) { prefs.symAutoClose = it }
         row(button("Редактировать SYM-панель") { startActivity(Intent(this, SymEditorActivity::class.java)) })
 
+        section("SymPad: навигация на SYM")
+        note("Удерживайте SYM и нажимайте буквы — они работают как стрелки, Home/End, Page Up/Down, медиа-клавиши и т.д. (схема настраивается). С Shift стрелки выделяют текст. Долгое нажатие SYM фиксирует режим — на полоске «<S>», буквы работают без SYM, не назначенные ничего не печатают; ещё одно нажатие SYM — выход. Панель символов при этом открывается коротким нажатием SYM (при отпускании).")
+        switch("Включить SymPad", prefs.symPad) { prefs.symPad = it; root.post { build() } }
+        if (prefs.symPad) {
+            switch("Фиксация долгим нажатием SYM", prefs.symPadLock) { prefs.symPadLock = it }
+            val longs = listOf(300, 400, 500, 700, 1000)
+            spinner("Долгое нажатие SYM", longs.map { "$it мс" },
+                longs.indexOf(prefs.symPadLongMs).let { if (it < 0) 2 else it }) { prefs.symPadLongMs = longs[it] }
+            switch("Вне текстовых полей: SYM+буква — SymPad (а не запуск приложений)", prefs.symPadOutsideText) { prefs.symPadOutsideText = it }
+            note("Вне текстовых полей Android передаёт клавиатуре нажатия, только если приложение её подключает, поэтому навигация там работает не везде. Медиа-клавиши уходят в активный плеер; перемотку (удержание ⏮/⏭) поддерживают не все плееры.")
+            row(button("Схема клавиш SymPad…") { startActivity(Intent(this, SymPadEditorActivity::class.java)) })
+        }
+
         section("Ввод")
         switch("Подсказки слов", prefs.suggestions) { prefs.suggestions = it }
         switch("Автоисправление на пробеле", prefs.autoCorrect) { prefs.autoCorrect = it }
