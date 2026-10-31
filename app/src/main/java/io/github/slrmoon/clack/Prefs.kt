@@ -75,22 +75,18 @@ class Prefs(context: Context) {
 
     /** Height of the colour strip in dp (≈6 dp per mm). */
     var ledHeightDp: Int
-        get() = sp.getInt(K_LED_HEIGHT, 12)
+        get() = sp.getInt(K_LED_HEIGHT, 6)
         set(v) = sp.edit().putInt(K_LED_HEIGHT, v).apply()
 
-    /** Indicators of the colour strip, left to right over the Titan 2 keys: Shift | SYM | language | Ctrl | Alt. */
-    enum class Led(val title: String, val active: Int, val locked: Int) {
-        SHIFT("Shift", 0xFF4CAF50.toInt(), 0xFF1B5E20.toInt()),
-        SYM("SYM", 0xFF29B6F6.toInt(), 0xFF0D47A1.toInt()),
-        CTRL("Ctrl", 0xFFFFCA28.toInt(), 0xFFE65100.toInt()),
-        ALT("Alt", 0xFFEF5350.toInt(), 0xFFB71C1C.toInt())
-    }
+    /** One colour for every indicator that is on (pressed / held / one-shot / automatic capital). */
+    var ledActiveColor: Int
+        get() = sp.getInt(K_LED_ACTIVE, 0xFF4CAF50.toInt())
+        set(v) = sp.edit().putInt(K_LED_ACTIVE, v).apply()
 
-    fun ledColor(led: Led, locked: Boolean): Int =
-        sp.getInt("led_${led.name.lowercase()}_${if (locked) "locked" else "active"}", if (locked) led.locked else led.active)
-
-    fun setLedColor(led: Led, locked: Boolean, color: Int) =
-        sp.edit().putInt("led_${led.name.lowercase()}_${if (locked) "locked" else "active"}", color).apply()
+    /** One colour for every locked indicator (double tap: Caps Lock, Alt/Ctrl lock, SymPad <S>). */
+    var ledLockedColor: Int
+        get() = sp.getInt(K_LED_LOCKED, 0xFFFF9800.toInt())
+        set(v) = sp.edit().putInt(K_LED_LOCKED, v).apply()
 
     var ledOffColor: Int
         get() = sp.getInt(K_LED_OFF, 0x40808080)
@@ -188,6 +184,8 @@ class Prefs(context: Context) {
         private const val K_BAR_MODE = "bar_mode"
         private const val K_LED_HEIGHT = "led_height_dp"
         private const val K_LED_OFF = "led_off"
+        private const val K_LED_ACTIVE = "led_active"
+        private const val K_LED_LOCKED = "led_locked"
         private const val K_NOTIFY = "notifications"
         val LAYOUT_PALETTE = intArrayOf(
             0xFF7E57C2.toInt(), 0xFF26A69A.toInt(), 0xFFEC407A.toInt(), 0xFF8D6E63.toInt(),

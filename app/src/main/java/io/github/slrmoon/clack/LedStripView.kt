@@ -32,14 +32,12 @@ class LedStripView(context: Context) : View(context) {
     private var colors = IntArray(5)
 
     fun update(prefs: Prefs, shift: State, sym: State, ctrl: State, alt: State, languageColor: Int) {
-        fun c(led: Prefs.Led, s: State) = when (s) {
+        fun c(st: State) = when (st) {
             State.OFF -> prefs.ledOffColor
-            State.ACTIVE -> prefs.ledColor(led, locked = false)
-            State.LOCKED -> prefs.ledColor(led, locked = true)
+            State.ACTIVE -> prefs.ledActiveColor
+            State.LOCKED -> prefs.ledLockedColor
         }
-        val next = intArrayOf(
-            c(Prefs.Led.SHIFT, shift), c(Prefs.Led.SYM, sym), languageColor, c(Prefs.Led.CTRL, ctrl), c(Prefs.Led.ALT, alt)
-        )
+        val next = intArrayOf(c(shift), c(sym), languageColor, c(ctrl), c(alt))
         if (!next.contentEquals(colors)) { colors = next; invalidate() }
     }
 

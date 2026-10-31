@@ -324,10 +324,10 @@ class SettingsActivity : Activity() {
 
     /** Colour strip: height, colours of every indicator, and of every enabled layout. */
     private fun ledSettings() {
-        val heights = listOf(6, 9, 12, 15, 18, 24)
+        val heights = listOf(3, 6, 9, 12, 18, 24)
         spinner("Высота полоски", heights.map { "$it dp (≈${"%.1f".format(it / 6.3)} мм)" },
-            heights.indexOf(prefs.ledHeightDp).let { if (it < 0) 2 else it }) { prefs.ledHeightDp = heights[it]; touch() }
-        note("Слева направо над клавишами: Shift | SYM | язык | Ctrl | Alt. «Нажата» — одно нажатие или удержание, «зафиксирована» — двойное нажатие, у SYM — режим SymPad <S>.")
+            heights.indexOf(prefs.ledHeightDp).let { if (it < 0) 1 else it }) { prefs.ledHeightDp = heights[it]; touch() }
+        note("Слева направо над клавишами: Shift | SYM | язык | Ctrl | Alt. «Включена» — одно нажатие, удержание или автоматическая заглавная; «зафиксирована» — двойное нажатие (Caps Lock, Alt/Ctrl), у SYM — режим SymPad <S>.")
         fun colorRow(label: String, color: Int, onPick: (Int) -> Unit) {
             val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
             line.addView(ColorPicker.swatch(this, color))
@@ -336,11 +336,9 @@ class SettingsActivity : Activity() {
             line.setOnClickListener { ColorPicker.show(this, label, color) { c -> onPick(c); touch(); build() } }
             root.addView(line)
         }
-        for (led in Prefs.Led.values()) {
-            colorRow("${led.title}: нажата", prefs.ledColor(led, false)) { prefs.setLedColor(led, false, it) }
-            colorRow("${led.title}: зафиксирована", prefs.ledColor(led, true)) { prefs.setLedColor(led, true, it) }
-        }
-        colorRow("Выключено (все индикаторы)", prefs.ledOffColor) { prefs.ledOffColor = it }
+        colorRow("Включена (все клавиши)", prefs.ledActiveColor) { prefs.ledActiveColor = it }
+        colorRow("Зафиксирована (все клавиши)", prefs.ledLockedColor) { prefs.ledLockedColor = it }
+        colorRow("Выключена (все клавиши)", prefs.ledOffColor) { prefs.ledOffColor = it }
         val enabled = prefs.enabledLayouts
         enabled.forEachIndexed { i, id ->
             val name = store.load(id)?.name ?: id

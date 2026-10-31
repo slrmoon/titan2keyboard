@@ -74,10 +74,15 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private var symPadMap: SymPadMap = SymPadMap.DEFAULT
     private val symLongPress = Runnable { onSymLongPress() }
     private val symHoldHint = Runnable {
-        if (symTracker.held && symPadChordHere() && !symPadLocked) {
-            symHoldHintShown = true
-            hint(if (prefs.symPadLock) "SymPad: SYM + клавиша · держите — фиксация" else "SymPad: SYM + клавиша")
+        if (!symTracker.held || symPadLocked) return@Runnable
+        val text = when {
+            symPadChordHere() ->
+                if (prefs.symPadLock) "SymPad: SYM + клавиша · держите — фиксация" else "SymPad: SYM + клавиша"
+            !inTextField() && prefs.quickLaunch -> "SYM + буква — запуск приложения"
+            else -> return@Runnable
         }
+        symHoldHintShown = true
+        hint(text)
     }
     private var symHoldHintShown = false
     private var lastHintText: String? = null
@@ -406,7 +411,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private var symArmed = false
     private val symTimeout = Runnable { disarmSym() }
     private val symHint = Runnable {
-        if (symArmed) Toast.makeText(this, "SYM: нажмите букву приложения", Toast.LENGTH_SHORT).show()
+        if (symArmed) hint("SYM: нажмите букву приложения")
     }
 
     /**
@@ -466,7 +471,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         main.removeCallbacks(symLongPress)
         main.removeCallbacks(symHoldHint)
         if (symPadLocked) { symUnlocking = true; return }
-        if (prefs.symPad) main.postDelayed(symHoldHint, SYM_HOLD_HINT_MS)
+        main.postDelayed(symHoldHint, SYM_HOLD_HINT_MS)
         updateBarChrome()
         if (prefs.symPad) {
             if (prefs.symPadLock) main.postDelayed(symLongPress, prefs.symPadLongMs.toLong())
@@ -1351,7 +1356,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         }
         val l = layout
         val langColor = if (l == null) prefs.ledOffColor else prefs.layoutColor(l.id, layouts.indexOf(l).coerceAtLeast(0))
-        strip.update(prefs, ledState(shift), sym, ledState(ctrl), ledState(alt, extraActive = field.numeric), langColor)
+        strip.update(prefs, ledState(shift, extraActive = autoShift), sym, ledState(ctrl), ledState(alt, extraActive = field.numeric), langColor)
     }
 
     private fun updateBarChrome() {
