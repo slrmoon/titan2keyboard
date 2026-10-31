@@ -143,8 +143,15 @@ class SettingsActivity : Activity() {
 
         // --- typing ---
         section("Полоска над клавиатурой")
-        switch("Показывать полоску (язык и подсказки)", prefs.showBar) { prefs.showBar = it }
-        note("Если полоска скрыта, смена языка и зафиксированные Shift/Alt/Ctrl показываются коротким сообщением внизу экрана. Подсказки тогда не видны, но автоисправление продолжает работать (его можно выключить ниже).")
+        spinner("Вид", listOf("Полная (язык и подсказки)", "Минимальная (цветные индикаторы)", "Скрыта"),
+            Prefs.BarMode.values().indexOf(prefs.barMode)) {
+            val m = Prefs.BarMode.values()[it]
+            if (m != prefs.barMode) { prefs.barMode = m; root.post { build() } }
+        }
+        if (prefs.barMode != Prefs.BarMode.FULL) note("Подсказок слов не видно, но автоисправление продолжает работать (его можно выключить ниже).")
+        if (prefs.barMode == Prefs.BarMode.MINIMAL) ledSettings()
+        switch("Уведомления о смене режимов и шорткатах", prefs.notifications) { prefs.notifications = it }
+        note("Короткие сообщения внизу экрана: смена языка, Shift / Caps Lock / Alt / Ctrl, SymPad (удержание, фиксация, действия), запуск приложений по SYM + буква. Не зависят от вида полоски.")
 
         section("SYM: символы и эмодзи")
         note("В текстовом поле: SYM — первая страница, ещё раз SYM — вторая, ещё раз — закрыть. Символ вводится тапом или клавишей, на которой он показан — можно сразу, не дожидаясь, пока панель появится. Приложения в текстовом поле SYM не запускает. Панель открывается и при скрытой полоске.")
@@ -166,8 +173,6 @@ class SettingsActivity : Activity() {
             note("Вне текстовых полей Android передаёт клавиатуре нажатия, только если приложение её подключает, поэтому навигация там работает не везде. Медиа-клавиши уходят в активный плеер; перемотку (удержание ⏮/⏭) поддерживают не все плееры.")
             row(button("Схема клавиш SymPad…") { startActivity(Intent(this, SymPadEditorActivity::class.java)) })
         }
-        spinner("Подсказки при удержании SYM и шорткатах", listOf("Всегда", "Только без полоски", "Никогда"),
-            Prefs.Hints.values().indexOf(prefs.shortcutHints)) { prefs.shortcutHints = Prefs.Hints.values()[it] }
 
         section("Ввод")
         switch("Подсказки слов", prefs.suggestions) { prefs.suggestions = it }
@@ -198,18 +203,9 @@ class SettingsActivity : Activity() {
         section("Быстрый запуск приложений")
         note("Вне текстовых полей (рабочий стол и т.п.): нажмите SYM, отпустите и в течение 5 секунд нажмите букву. Если на неё назначено приложение — оно откроется, иначе появится список приложений на эту букву (в любой раскладке: T — и «Telegram», и «Еда»). Долгое нажатие в списке назначает приложение на букву. В текстовом поле SYM открывает символы; чтобы запускать приложения и оттуда, выберите ниже «SYM в текстовом поле: запуск приложений».")
         switch("Включено", prefs.quickLaunch) { prefs.quickLaunch = it }
-        val launcher = AppLauncher(this)
-        val assignments = launcher.assignments()
-        if (assignments.isEmpty()) note("Пока ничего не назначено.")
-        for ((key, app) in assignments) {
-            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            line.addView(TextView(this).apply {
-                text = "SYM+${AppLauncher.keyLabel(key)}  →  ${app.label}"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            line.addView(iconButton("✕") { launcher.unassign(key); build() })
-            root.addView(line)
-        }
+        val assignments = AppLauncher(this).assignments()
+        note(if (assignments.isEmpty()) "Назначений пока нет." else assignments.joinToString("   ") { (k, a) -> "${AppLauncher.keyLabel(k)} → ${a.label}" })
+        row(button("Назначить приложения на буквы…") { startActivity(Intent(this, QuickLaunchEditorActivity::class.java)) })
 
         // --- learning ---
         section("Мой словарь")
@@ -324,6 +320,33 @@ class SettingsActivity : Activity() {
             .setItems(names) { _, which ->
                 startActivity(LayoutEditorActivity.create(this, if (which == 0) null else all[which - 1].id))
             }.show()
+    }
+
+    /** Colour strip: height, colours of every indicator, and of every enabled layout. */
+    private fun ledSettings() {
+        val heights = listOf(6, 9, 12, 15, 18, 24)
+        spinner("Высота полоски", heights.map { "$it dp (≈${"%.1f".format(it / 6.3)} мм)" },
+            heights.indexOf(prefs.ledHeightDp).let { if (it < 0) 2 else it }) { prefs.ledHeightDp = heights[it]; touch() }
+        note("Слева направо над клавишами: Shift | SYM | язык | Ctrl | Alt. «Нажата» — одно нажатие или удержание, «зафиксирована» — двойное нажатие, у SYM — режим SymPad <S>.")
+        fun colorRow(label: String, color: Int, onPick: (Int) -> Unit) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
+            line.addView(ColorPicker.swatch(this, color))
+            line.addView(TextView(this).apply { text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            line.setOnClickListener { ColorPicker.show(this, label, color) { c -> onPick(c); touch(); build() } }
+            root.addView(line)
+        }
+        for (led in Prefs.Led.values()) {
+            colorRow("${led.title}: нажата", prefs.ledColor(led, false)) { prefs.setLedColor(led, false, it) }
+            colorRow("${led.title}: зафиксирована", prefs.ledColor(led, true)) { prefs.setLedColor(led, true, it) }
+        }
+        colorRow("Выключено (все индикаторы)", prefs.ledOffColor) { prefs.ledOffColor = it }
+        val enabled = prefs.enabledLayouts
+        enabled.forEachIndexed { i, id ->
+            val name = store.load(id)?.name ?: id
+            colorRow("Язык: $name", prefs.layoutColor(id, i)) { prefs.setLayoutColor(id, it) }
+        }
+        row(button("Сбросить цвета") { prefs.resetLedColors(); touch(); build() })
     }
 
     private fun move(id: String, delta: Int) {

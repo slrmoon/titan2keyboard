@@ -59,6 +59,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
     private var fnHeld = false
 
     private var bar: BarView? = null
+    private var leds: LedStripView? = null
     private var symPanel: SymPanelView? = null
     /** 0 = SYM panel closed, otherwise the page shown (1 symbols, 2 emoji). */
     private var symPage = 0
@@ -165,7 +166,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         symPages = (1..LayoutStore.SYM_PAGES).map { store.symPage(it) }
         symPadMap = store.symPadMap()
         if (!prefs.symPad && symPadLocked) { symPadLocked = false }
-        bar?.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
+        applyBarMode()
         if (symPage > 0) renderSymPanel()
         updateInputViewShown()
         updateBarChrome()
@@ -183,7 +184,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         bar = v
         symPanel = panel
         panel.visibility = View.GONE
-        v.visibility = if (prefs.showBar) View.VISIBLE else View.GONE
+        val strip = LedStripView(this)
+        leds = strip
+        applyBarMode()
         updateBarChrome()
         // the window may have been opened just to show the SYM panel
         if (symPage > 0) main.post { renderSymPanel() }
@@ -191,6 +194,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             orientation = android.widget.LinearLayout.VERTICAL
             addView(panel)
             addView(v)
+            addView(strip)
         }
     }
 
@@ -366,14 +370,14 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
                     // automatic capital was pending: a Shift tap cancels it instead of adding another
                     shift.reset()
                     autoShift = false
-                    notifyIfNoBar("Shift выкл")
+                    notify("Shift выкл")
                 } else if (shift.mode == StickyModifier.Mode.OFF) autoShift = false
                 val now = shift.mode
                 when {
-                    now == StickyModifier.Mode.LOCKED && before != now -> notifyIfNoBar("⇪ Caps Lock")
-                    now == StickyModifier.Mode.ONESHOT && before != now -> notifyIfNoBar("⇧ Shift")
-                    now == StickyModifier.Mode.OFF && before == StickyModifier.Mode.LOCKED -> notifyIfNoBar("Caps Lock выкл")
-                    now == StickyModifier.Mode.OFF && before != now -> notifyIfNoBar("Shift выкл")
+                    now == StickyModifier.Mode.LOCKED && before != now -> notify("⇪ Caps Lock")
+                    now == StickyModifier.Mode.ONESHOT && before != now -> notify("⇧ Shift")
+                    now == StickyModifier.Mode.OFF && before == StickyModifier.Mode.LOCKED -> notify("Caps Lock выкл")
+                    now == StickyModifier.Mode.OFF && before != now -> notify("Shift выкл")
                 }
                 updateBarChrome()
                 return true
@@ -381,14 +385,14 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
             KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT -> {
                 val before = alt.mode
                 alt.onUp(event.eventTime)
-                if (before != alt.mode) notifyIfNoBar(modeText("Alt", alt.mode))
+                if (before != alt.mode) notify(modeText("Alt", alt.mode))
                 updateBarChrome()
                 return true
             }
             KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> {
                 val before = ctrl.mode
                 ctrl.onUp(event.eventTime)
-                if (before != ctrl.mode) notifyIfNoBar(modeText("Ctrl", ctrl.mode))
+                if (before != ctrl.mode) notify(modeText("Ctrl", ctrl.mode))
                 updateBarChrome()
                 return true
             }
@@ -462,7 +466,8 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         main.removeCallbacks(symLongPress)
         main.removeCallbacks(symHoldHint)
         if (symPadLocked) { symUnlocking = true; return }
-        if (prefs.symPad) { main.postDelayed(symHoldHint, SYM_HOLD_HINT_MS); updateBarChrome() }
+        if (prefs.symPad) main.postDelayed(symHoldHint, SYM_HOLD_HINT_MS)
+        updateBarChrome()
         if (prefs.symPad) {
             if (prefs.symPadLock) main.postDelayed(symLongPress, prefs.symPadLongMs.toLong())
         } else if (symIsForSymbols()) {
@@ -580,11 +585,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
 
     /** Short message for SymPad and shortcuts; repeated identical messages are not stacked. */
     private fun hint(text: String, force: Boolean = false) {
-        when (prefs.shortcutHints) {
-            Prefs.Hints.NEVER -> if (!force || prefs.showBar) return
-            Prefs.Hints.NO_BAR -> if (prefs.showBar) return
-            Prefs.Hints.ALWAYS -> {}
-        }
+        if (!prefs.notifications) return
         val now = SystemClock.uptimeMillis()
         if (!force && text == lastHintText && now - lastHintAt < HINT_REPEAT_MS) return
         lastHintText = text
@@ -599,6 +600,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
      */
     private fun sendSymPadKey(ic: InputConnection, action: SymPadAction, repeat: Int, selecting: Boolean) {
         if (!field.raw) finishComposing(ic)
+        // At the edge of the text a text view does not use the key, and Android then moves focus to
+        // the next element (the cursor "leaves" the field and the keyboard closes). Don't send it.
+        if (!field.raw && wouldLeaveField(ic, action, selecting)) return
         var meta = 0
         if (action.ctrl) meta = meta or KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
         if (action.shift && !selecting) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
@@ -609,6 +613,18 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, action.key, repeat, meta))
         ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, action.key, 0, meta))
         if (selecting) ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SHIFT_LEFT, 0, 0))
+    }
+
+    private fun wouldLeaveField(ic: InputConnection, action: SymPadAction, selecting: Boolean): Boolean {
+        val backward = action == SymPadAction.LEFT || action == SymPadAction.WORD_LEFT ||
+            action == SymPadAction.LINE_START || action == SymPadAction.DOC_START
+        val forward = action == SymPadAction.RIGHT || action == SymPadAction.WORD_RIGHT ||
+            action == SymPadAction.LINE_END || action == SymPadAction.DOC_END
+        if (!backward && !forward) return false // ↑ ↓ and the rest are sent as they are
+        // with a selection, an arrow without Shift collapses it: the view uses the key
+        if (!selecting && !ic.getSelectedText(0).isNullOrEmpty()) return false
+        return if (backward) ic.getTextBeforeCursor(1, 0).isNullOrEmpty()
+        else ic.getTextAfterCursor(1, 0).isNullOrEmpty()
     }
 
     /** Previous/next track: a tap switches tracks on release, holding seeks while held. */
@@ -713,6 +729,7 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         // (don't test isInputViewShown here: after the panel is gone the view already counts as hidden,
         // while the empty window is still on screen)
         if (symPage == 0 && !prefs.showBar) requestHideSelf(0)
+        updateBarChrome()
     }
 
     private fun closeSymPanel() {
@@ -774,9 +791,9 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         StickyModifier.Mode.OFF -> "$name выкл"
     }
 
-    /** With the bar hidden, short messages at the bottom of the screen tell what changed. */
-    private fun notifyIfNoBar(text: String) {
-        if (prefs.showBar) return
+    /** Short message at the bottom of the screen; one switch for all of them, independent of the bar. */
+    private fun notify(text: String) {
+        if (!prefs.notifications) return
         lastToast?.cancel()
         lastToast = Toast.makeText(this, text, Toast.LENGTH_SHORT).also { it.show() }
     }
@@ -1305,13 +1322,40 @@ class ClackService : InputMethodService(), SharedPreferences.OnSharedPreferenceC
         layout?.let {
             prefs.currentLayout = it.id // triggers reloadConfig via the listener; index is preserved
             languages.attachLayout(it)
-            notifyIfNoBar("${it.shortLabel} · ${it.name}")
+            notify("${it.shortLabel} · ${it.name}")
         }
         updateBarChrome()
         showFor(Mode.NEXT)
     }
 
+    private fun applyBarMode() {
+        val mode = prefs.barMode
+        bar?.visibility = if (mode == Prefs.BarMode.FULL) View.VISIBLE else View.GONE
+        leds?.visibility = if (mode == Prefs.BarMode.MINIMAL) View.VISIBLE else View.GONE
+        leds?.heightDp = prefs.ledHeightDp
+    }
+
+    private fun ledState(m: StickyModifier, extraActive: Boolean = false) = when {
+        m.mode == StickyModifier.Mode.LOCKED -> LedStripView.State.LOCKED
+        m.active || extraActive -> LedStripView.State.ACTIVE
+        else -> LedStripView.State.OFF
+    }
+
+    private fun updateLeds() {
+        val strip = leds ?: return
+        if (prefs.barMode != Prefs.BarMode.MINIMAL) return
+        val sym = when {
+            symPadLocked -> LedStripView.State.LOCKED
+            symTracker.held || symArmed || symPage > 0 -> LedStripView.State.ACTIVE
+            else -> LedStripView.State.OFF
+        }
+        val l = layout
+        val langColor = if (l == null) prefs.ledOffColor else prefs.layoutColor(l.id, layouts.indexOf(l).coerceAtLeast(0))
+        strip.update(prefs, ledState(shift), sym, ledState(ctrl), ledState(alt, extraActive = field.numeric), langColor)
+    }
+
     private fun updateBarChrome() {
+        updateLeds()
         val b = bar ?: return
         b.setLanguage(layout?.shortLabel ?: "--")
         val parts = ArrayList<String>()

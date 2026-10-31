@@ -56,6 +56,11 @@
             android:label="Схема SymPad" />
 
         <activity
+            android:name=".QuickLaunchEditorActivity"
+            android:exported="false"
+            android:label="Быстрый запуск" />
+
+        <activity
             android:name=".AppPickerActivity"
             android:exported="false"
             android:excludeFromRecents="true"

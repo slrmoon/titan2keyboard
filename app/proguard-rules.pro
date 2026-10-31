@@ -5,3 +5,4 @@
 -keep class io.github.slrmoon.clack.LayoutEditorActivity
 -keep class io.github.slrmoon.clack.SymEditorActivity
 -keep class io.github.slrmoon.clack.SymPadEditorActivity
+-keep class io.github.slrmoon.clack.QuickLaunchEditorActivity

@@ -59,10 +59,52 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_QUICK_LAUNCH, true)
         set(v) = sp.edit().putBoolean(K_QUICK_LAUNCH, v).apply()
 
-    /** Thin strip with language and suggestions above the keyboard. */
-    var showBar: Boolean
-        get() = sp.getBoolean(K_SHOW_BAR, true)
-        set(v) = sp.edit().putBoolean(K_SHOW_BAR, v).apply()
+    /** Above the physical keyboard: full bar (language + suggestions), a thin colour strip, or nothing. */
+    enum class BarMode { FULL, MINIMAL, HIDDEN }
+
+    var barMode: BarMode
+        get() {
+            val v = sp.getString(K_BAR_MODE, null)
+                ?: return if (sp.getBoolean(K_SHOW_BAR, true)) BarMode.FULL else BarMode.HIDDEN
+            return runCatching { BarMode.valueOf(v) }.getOrDefault(BarMode.FULL)
+        }
+        set(v) = sp.edit().putString(K_BAR_MODE, v.name).apply()
+
+    /** Something is shown above the keyboard (full bar or colour strip). */
+    val showBar: Boolean get() = barMode != BarMode.HIDDEN
+
+    /** Height of the colour strip in dp (≈6 dp per mm). */
+    var ledHeightDp: Int
+        get() = sp.getInt(K_LED_HEIGHT, 12)
+        set(v) = sp.edit().putInt(K_LED_HEIGHT, v).apply()
+
+    /** Indicators of the colour strip, left to right over the Titan 2 keys: Shift | SYM | language | Ctrl | Alt. */
+    enum class Led(val title: String, val active: Int, val locked: Int) {
+        SHIFT("Shift", 0xFF4CAF50.toInt(), 0xFF1B5E20.toInt()),
+        SYM("SYM", 0xFF29B6F6.toInt(), 0xFF0D47A1.toInt()),
+        CTRL("Ctrl", 0xFFFFCA28.toInt(), 0xFFE65100.toInt()),
+        ALT("Alt", 0xFFEF5350.toInt(), 0xFFB71C1C.toInt())
+    }
+
+    fun ledColor(led: Led, locked: Boolean): Int =
+        sp.getInt("led_${led.name.lowercase()}_${if (locked) "locked" else "active"}", if (locked) led.locked else led.active)
+
+    fun setLedColor(led: Led, locked: Boolean, color: Int) =
+        sp.edit().putInt("led_${led.name.lowercase()}_${if (locked) "locked" else "active"}", color).apply()
+
+    var ledOffColor: Int
+        get() = sp.getInt(K_LED_OFF, 0x40808080)
+        set(v) = sp.edit().putInt(K_LED_OFF, v).apply()
+
+    /** Colour of the middle zone for a layout; defaults cycle through a palette by position. */
+    fun layoutColor(id: String, index: Int): Int = sp.getInt("led_layout_$id", LAYOUT_PALETTE[index.mod(LAYOUT_PALETTE.size)])
+    fun setLayoutColor(id: String, color: Int) = sp.edit().putInt("led_layout_$id", color).apply()
+
+    fun resetLedColors() {
+        val e = sp.edit()
+        for (k in sp.all.keys) if (k.startsWith("led_") && k != K_LED_HEIGHT) e.remove(k)
+        e.apply()
+    }
 
     enum class SymTap { SYMBOLS, APPS }
 
@@ -120,12 +162,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_SYMPAD_OUTSIDE, false)
         set(v) = sp.edit().putBoolean(K_SYMPAD_OUTSIDE, v).apply()
 
-    enum class Hints { ALWAYS, NO_BAR, NEVER }
-
-    /** Short messages when holding SYM, on SymPad actions and app shortcuts. */
-    var shortcutHints: Hints
-        get() = runCatching { Hints.valueOf(sp.getString(K_HINTS, Hints.ALWAYS.name)!!) }.getOrDefault(Hints.ALWAYS)
-        set(v) = sp.edit().putString(K_HINTS, v.name).apply()
+    /** Short messages at the bottom of the screen: language, Shift/Alt/Ctrl, SymPad, shortcuts. Independent of the bar. */
+    var notifications: Boolean
+        get() = sp.getBoolean(K_NOTIFY, true)
+        set(v) = sp.edit().putBoolean(K_NOTIFY, v).apply()
 
     var multiTapMs: Int
         get() = sp.getInt(K_MULTITAP, 450)
@@ -145,8 +185,15 @@ class Prefs(context: Context) {
         private const val K_MULTITAP = "multitap_ms"
         private const val K_QUICK_LAUNCH = "quick_launch"
         private const val K_SHOW_BAR = "show_bar"
+        private const val K_BAR_MODE = "bar_mode"
+        private const val K_LED_HEIGHT = "led_height_dp"
+        private const val K_LED_OFF = "led_off"
+        private const val K_NOTIFY = "notifications"
+        val LAYOUT_PALETTE = intArrayOf(
+            0xFF7E57C2.toInt(), 0xFF26A69A.toInt(), 0xFFEC407A.toInt(), 0xFF8D6E63.toInt(),
+            0xFF5C6BC0.toInt(), 0xFF9CCC65.toInt(), 0xFFFFA726.toInt(), 0xFF78909C.toInt()
+        )
         private const val K_SYMPAD = "sympad"
-        private const val K_HINTS = "shortcut_hints"
         private const val K_SYMPAD_LOCK = "sympad_lock"
         private const val K_SYMPAD_LONG_MS = "sympad_long_ms"
         private const val K_SYMPAD_OUTSIDE = "sympad_outside_text"
